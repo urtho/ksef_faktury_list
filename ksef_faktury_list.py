@@ -278,6 +278,47 @@ class KSeFClient:
             headers['Authorization'] = f'Bearer {self.authentication_token}'
         return headers
 
+    @staticmethod
+    def _parse_retry_after(response):
+        """Parse Retry-After header, return seconds to wait or None."""
+        val = response.headers.get('Retry-After')
+        if not val:
+            return None
+        try:
+            return int(val)
+        except ValueError:
+            pass
+        try:
+            from email.utils import parsedate_to_datetime
+            retry_dt = parsedate_to_datetime(val)
+            delta = (retry_dt - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+            return max(1, int(delta))
+        except Exception:
+            return None
+
+    def _send_http(self, method, url, headers, data=None, json_data=None, max_retries=3):
+        """Send HTTP request with Retry-After handling."""
+        for attempt in range(max_retries + 1):
+            if method.upper() == 'GET':
+                response = requests.get(url, headers=headers, timeout=self.timeout)
+            elif method.upper() == 'POST':
+                if data is not None:
+                    response = requests.post(url, headers=headers, data=data, timeout=self.timeout)
+                else:
+                    response = requests.post(url, headers=headers, json=json_data, timeout=self.timeout)
+            elif method.upper() == 'DELETE':
+                response = requests.delete(url, headers=headers, timeout=self.timeout)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+
+            retry_after = self._parse_retry_after(response)
+            if retry_after and attempt < max_retries:
+                logger.warning(f"KSeF Retry-After: {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_after)
+                continue
+            return response
+        return response  # unreachable, but keeps linters happy
+
     def _make_request(
         self,
         method: str,
@@ -319,21 +360,10 @@ class KSeFClient:
             logger.debug(f"KSeF Request data: {json.dumps(data, indent=2)}")
 
         try:
-            if method.upper() == 'GET':
-                response = requests.get(url, headers=headers, timeout=self.timeout)
-            elif method.upper() == 'POST':
-                if xml_data:
-                    response = requests.post(
-                        url, headers=headers, data=xml_data.encode('utf-8'), timeout=self.timeout
-                    )
-                else:
-                    response = requests.post(
-                        url, headers=headers, json=data, timeout=self.timeout
-                    )
-            elif method.upper() == 'DELETE':
-                response = requests.delete(url, headers=headers, timeout=self.timeout)
+            if xml_data:
+                response = self._send_http(method, url, headers, data=xml_data.encode('utf-8'))
             else:
-                raise ValueError(f"Unsupported HTTP method: {method}")
+                response = self._send_http(method, url, headers, json_data=data)
 
             logger.info(f"KSeF Response: {response.status_code}")
             logger.debug(f"KSeF Response body: {response.text[:2000] if response.text else 'EMPTY'}")
@@ -961,7 +991,7 @@ class KSeFClient:
         headers['Accept'] = 'application/octet-stream'
 
         logger.info(f"KSeF XML download: GET {url}")
-        response = requests.get(url, headers=headers, timeout=self.timeout)
+        response = self._send_http('GET', url, headers)
         logger.info(f"KSeF XML download response: {response.status_code}, {len(response.content)} bytes")
 
         if response.status_code >= 400:
@@ -1766,12 +1796,12 @@ def expand_date_template(path_template, date_str=None):
 
 
 def _sanitize_for_filename(text):
-    """Lowercase and strip everything except [a-z0-9]."""
-    return re.sub(r'[^a-z0-9]', '', text.lower())
+    """Lowercase and replace non [a-z0-9-] characters with underscore."""
+    return re.sub(r'[^a-z0-9\-]', '_', text.lower()).strip('_')
 
 
-def _extract_seller_and_number(xml_raw):
-    """Extract seller name and invoice number from KSeF XML bytes."""
+def _extract_invoice_parties(xml_raw):
+    """Extract seller name, buyer name, and invoice number from KSeF XML bytes."""
     root = etree.fromstring(xml_raw)
     for elem in root.iter():
         if '}' in elem.tag:
@@ -1782,11 +1812,17 @@ def _extract_seller_and_number(xml_raw):
         dane = podmiot1.find('DaneIdentyfikacyjne')
         if dane is not None:
             seller_name = dane.findtext('Nazwa', '')
+    buyer_name = ''
+    podmiot2 = root.find('.//Podmiot2')
+    if podmiot2 is not None:
+        dane = podmiot2.find('DaneIdentyfikacyjne')
+        if dane is not None:
+            buyer_name = dane.findtext('Nazwa', '')
     inv_number = ''
     fa = root.find('.//Fa')
     if fa is not None:
         inv_number = fa.findtext('P_2', '')
-    return seller_name, inv_number
+    return seller_name, buyer_name, inv_number
 
 
 def load_config(config_path):
@@ -1826,8 +1862,8 @@ def load_config(config_path):
     # output
     c.output = output.get('format', 'table')
     c.xml_output_dir = output.get('xml_output_dir')
-    c.download_xml = output.get('download_xml', bool(c.xml_output_dir))
     c.pdf_output_dir = output.get('pdf_output_dir')
+    c.download_xml = output.get('download_xml', bool(c.xml_output_dir))
     c.download_pdf = output.get('download_pdf', bool(c.pdf_output_dir))
     # email
     c.send_email = bool(email.get('smtp_host'))
@@ -1866,7 +1902,10 @@ def main():
     # Offline XML to PDF conversion (no authentication needed)
     if args.xml_to_pdf:
         xml_path = args.xml_to_pdf
-        pdf_output_dir = expand_date_template(args.pdf_output_dir)
+        pdf_dir_cfg = args.pdf_output_dir
+        if isinstance(pdf_dir_cfg, dict):
+            pdf_dir_cfg = next(iter(pdf_dir_cfg.values()), '.')
+        pdf_output_dir = expand_date_template(pdf_dir_cfg or '.')
 
         if not os.path.exists(xml_path):
             print(f"Błąd: Ścieżka nie znaleziona: {xml_path}", file=sys.stderr)
@@ -2033,6 +2072,14 @@ def main():
                     date_type = 'PermanentStorage'
                     print(f"Incremental sync od {date_from} (PermanentStorage z state.json)")
 
+            # Resolve per-subject output dirs
+            xml_output_dir = args.xml_output_dir
+            if isinstance(xml_output_dir, dict):
+                xml_output_dir = xml_output_dir.get(subject_type)
+            pdf_output_dir = args.pdf_output_dir
+            if isinstance(pdf_output_dir, dict):
+                pdf_output_dir = pdf_output_dir.get(subject_type)
+
             # Query invoices
             subject_type_label = "wystawione (sprzedaż)" if subject_type == "Subject1" else "otrzymane (zakupy)"
             print(f"\nPobieranie faktur {subject_type_label}...")
@@ -2055,21 +2102,22 @@ def main():
                 print_invoices_table(invoices)
 
             # Download XML if requested
-            if args.download_xml and invoices:
-                print(f"\nPobieranie plików XML do: {args.xml_output_dir}")
+            if xml_output_dir and invoices:
+                print(f"\nPobieranie plików XML do: {xml_output_dir}")
 
                 for inv in invoices:
                     ksef_number = inv.get('ksefNumber')
                     if ksef_number:
                         try:
                             xml_raw = get_xml_cached(ksef_number)
-                            xml_dir = expand_date_template(args.xml_output_dir, inv.get('issueDate'))
+                            xml_dir = expand_date_template(xml_output_dir, inv.get('issueDate'))
                             os.makedirs(xml_dir, exist_ok=True)
                             safe_name = ksef_number.replace('/', '_').replace('\\', '_')
+                            seller_name, buyer_name, inv_number = _extract_invoice_parties(xml_raw)
                             if subject_type == 'Subject2':
-                                seller_name, inv_number = _extract_seller_and_number(xml_raw)
-                                suffix = '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(seller_name)
-                                safe_name += suffix
+                                safe_name += '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(seller_name)
+                            elif subject_type == 'Subject1':
+                                safe_name += '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(buyer_name)
                             filepath = os.path.join(xml_dir, f"{safe_name}.xml")
                             with open(filepath, 'wb') as f:
                                 f.write(xml_raw)
@@ -2078,8 +2126,8 @@ def main():
                             print(f"  Błąd pobierania {ksef_number}: {e.message}", file=sys.stderr)
 
             # Generate PDF if requested
-            if args.download_pdf and invoices:
-                print(f"\nGenerowanie plików PDF do: {args.pdf_output_dir}")
+            if pdf_output_dir and invoices:
+                print(f"\nGenerowanie plików PDF do: {pdf_output_dir}")
                 pdf_generator = InvoicePDFGenerator()
 
                 for inv in invoices:
@@ -2088,13 +2136,14 @@ def main():
                         try:
                             xml_raw = get_xml_cached(ksef_number)
                             xml_text = xml_raw.decode('utf-8')
-                            pdf_dir = expand_date_template(args.pdf_output_dir, inv.get('issueDate'))
+                            pdf_dir = expand_date_template(pdf_output_dir, inv.get('issueDate'))
                             os.makedirs(pdf_dir, exist_ok=True)
                             safe_name = ksef_number.replace('/', '_').replace('\\', '_')
+                            seller_name, buyer_name, inv_number = _extract_invoice_parties(xml_raw)
                             if subject_type == 'Subject2':
-                                seller_name, inv_number = _extract_seller_and_number(xml_raw)
-                                suffix = '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(seller_name)
-                                safe_name += suffix
+                                safe_name += '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(seller_name)
+                            elif subject_type == 'Subject1':
+                                safe_name += '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(buyer_name)
                             filepath = os.path.join(pdf_dir, f"{safe_name}.pdf")
                             pdf_generator.generate_pdf(xml_text, filepath,
                                                        environment=args.env, ksef_number=ksef_number,
