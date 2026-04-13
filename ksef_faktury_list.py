@@ -31,34 +31,15 @@ This script supports two authentication methods:
 - XAdES-BES digital signature with a qualified certificate
 - KSeF authorization token
 
+Configuration is read from a JSON file (default: config.json).
+
 Usage:
-    # Certificate authentication (XAdES)
-    python ksef_faktury_list.py --nip 1234567890 --cert cert.pem --key key.pem --password secret
-    python ksef_faktury_list.py --nip 1234567890 --cert cert.pem --key key.pem --password-file haslo.txt
+    python ksef_faktury_list.py                  # uses config.json
+    python ksef_faktury_list.py myconfig.json    # uses custom config file
 
-    # Token authentication
-    python ksef_faktury_list.py --nip 1234567890 --token "your-ksef-token"
-    python ksef_faktury_list.py --nip 1234567890 --token-file token.txt
-
-Options:
-    --nip           NIP of the entity (required)
-    --cert          Path to certificate file (PEM format) - for XAdES auth
-    --key           Path to private key file (PEM format) - for XAdES auth
-    --password      Password for encrypted private key
-    --password-file File containing password for private key
-    --token         KSeF authorization token - for token auth
-    --token-file    File containing KSeF token
-    --env           Environment: test, demo, prod (default: prod)
-    --date-from     Start date YYYY-MM-DD (default: 30 days ago)
-    --date-to       End date YYYY-MM-DD (default: today)
-    --subject-type  Subject1 (issued/sales) or Subject2 (received/purchases), default: Subject2
-    --output        Output format: table, json, xml (default: table)
-    --download-xml  Download full XML for each invoice
-    --download-pdf  Generate PDF for each invoice
-    --verbose       Enable verbose logging
+See config.json for all available options.
 """
 
-import argparse
 import base64
 import datetime
 import hashlib
@@ -977,7 +958,9 @@ class KSeFClient:
         headers = self._get_headers(with_session=True)
         headers['Accept'] = 'application/octet-stream'
 
+        logger.info(f"KSeF XML download: GET {url}")
         response = requests.get(url, headers=headers, timeout=self.timeout)
+        logger.info(f"KSeF XML download response: {response.status_code}, {len(response.content)} bytes")
 
         if response.status_code >= 400:
             raise KSeFError(
@@ -1317,6 +1300,7 @@ class InvoicePDFGenerator:
         Returns:
             Path to generated PDF
         """
+        logger.info(f"PDF generation: {output_path} (ksef_number={ksef_number})")
         data = self._parse_xml(xml_content)
         currency = data.get('currency', 'PLN')
 
@@ -1578,6 +1562,7 @@ class InvoicePDFGenerator:
             ))
 
         doc.build(elements)
+        logger.info(f"PDF generated: {output_path} ({len(data.get('items', []))} items, gross={data.get('summary', {}).get('gross', 0)})")
         return output_path
 
 
@@ -1755,98 +1740,70 @@ def send_grouped_email(
         logger.info(f"Email zbiorczy wysłany pomyślnie ({len(invoices_data)} faktur, {attachment_count} załączników)")
 
 
+def load_config(config_path):
+    """Load configuration from JSON file and return a namespace object."""
+    if not os.path.exists(config_path):
+        print(f"Błąd: Plik konfiguracji nie znaleziony: {config_path}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(config_path, 'r') as f:
+        cfg = json.load(f)
+
+    auth = cfg.get('auth', {})
+    query = cfg.get('query', {})
+    output = cfg.get('output', {})
+    email = cfg.get('email', {})
+
+    class Config:
+        pass
+
+    c = Config()
+    c.nip = cfg.get('nip')
+    c.xml_to_pdf = cfg.get('xml_to_pdf')
+    c.env = cfg.get('env', 'prod')
+    c.verbose = cfg.get('verbose', False)
+    # auth
+    c.cert = auth.get('cert')
+    c.key = auth.get('key')
+    c.password = auth.get('password')
+    c.password_file = auth.get('password_file')
+    c.token = auth.get('token')
+    c.token_file = auth.get('token_file')
+    # query
+    c.subject_type = query.get('subject_type', 'Subject2')
+    c.date_from = query.get('date_from')
+    c.date_to = query.get('date_to')
+    # output
+    c.output = output.get('format', 'table')
+    c.download_xml = output.get('download_xml', False)
+    c.xml_output_dir = output.get('xml_output_dir', '.')
+    c.download_pdf = output.get('download_pdf', False)
+    c.pdf_output_dir = output.get('pdf_output_dir', '.')
+    # email
+    c.send_email = bool(email.get('smtp_host'))
+    c.smtp_host = email.get('smtp_host')
+    c.smtp_port = email.get('smtp_port', 587)
+    c.smtp_user = email.get('smtp_user')
+    c.smtp_password = email.get('smtp_password')
+    c.smtp_password_file = email.get('smtp_password_file')
+    c.email_from = email.get('from')
+    c.email_to = email.get('to') or None
+    c.email_subject = email.get('subject', 'Faktura KSeF: {invoice_number}')
+    c.email_group = email.get('group', 'single')
+
+    return c
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description='Fetch invoices from KSeF (Krajowy System e-Faktur)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    # Certificate authentication (XAdES)
-    %(prog)s --nip 1234567890 --cert cert.pem --key key.pem --password secret
-    %(prog)s --nip 1234567890 --cert cert.pem --key key.pem --password-file pass.txt
+    config_path = sys.argv[1] if len(sys.argv) > 1 else 'config.json'
+    args = load_config(config_path)
 
-    # Token authentication
-    %(prog)s --nip 1234567890 --token "your-ksef-token"
-    %(prog)s --nip 1234567890 --token-file token.txt
-
-    # With options
-    %(prog)s --nip 1234567890 --token-file token.txt --env prod --date-from 2025-01-01
-    %(prog)s --nip 1234567890 --token-file token.txt --download-pdf --pdf-output-dir ./pdf
-
-    # Offline XML to PDF conversion (no authentication needed)
-    %(prog)s --xml-to-pdf faktura.xml
-    %(prog)s --xml-to-pdf ./faktury_xml/ --pdf-output-dir ./faktury_pdf/
-        """
-    )
-
-    parser.add_argument('--nip', help='NIP of the entity (required for KSeF queries)')
-
-    # Offline XML to PDF conversion
-    offline_group = parser.add_argument_group('Offline XML to PDF conversion (no authentication needed)')
-    offline_group.add_argument('--xml-to-pdf', metavar='PATH',
-                               help='Convert XML file or directory of XML files to PDF (offline, no KSeF auth)')
-
-    # Certificate auth options
-    auth_cert = parser.add_argument_group('Certificate authentication (XAdES)')
-    auth_cert.add_argument('--cert', help='Path to certificate file (PEM)')
-    auth_cert.add_argument('--key', help='Path to private key file (PEM)')
-    auth_cert.add_argument('--password', help='Password for encrypted private key')
-    auth_cert.add_argument('--password-file', help='File containing password for private key')
-
-    # Token auth options
-    auth_token = parser.add_argument_group('Token authentication')
-    auth_token.add_argument('--token', help='KSeF authorization token')
-    auth_token.add_argument('--token-file', help='File containing KSeF token')
-    parser.add_argument('--env', choices=['test', 'demo', 'prod'], default='prod',
-                        help='KSeF environment (default: prod)')
-    parser.add_argument('--date-from', help='Start date YYYY-MM-DD (default: 30 days ago)')
-    parser.add_argument('--date-to', help='End date YYYY-MM-DD (default: today)')
-    parser.add_argument('--subject-type', choices=['Subject1', 'Subject2'], default='Subject2',
-                        help='Subject1=issued/sales, Subject2=received/purchases (default: Subject2)')
-    parser.add_argument('--output', choices=['table', 'json'], default='table',
-                        help='Output format (default: table)')
-    parser.add_argument('--download-xml', action='store_true',
-                        help='Download full XML for each invoice')
-    parser.add_argument('--xml-output-dir', default='.',
-                        help='Directory to save XML files (default: current directory)')
-    parser.add_argument('--download-pdf', action='store_true',
-                        help='Generate PDF for each invoice')
-    parser.add_argument('--pdf-output-dir', default='.',
-                        help='Directory to save PDF files (default: current directory)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                        help='Enable verbose logging')
-
-    # Email options
-    email_group = parser.add_argument_group('Email sending')
-    email_group.add_argument('--send-email', action='store_true',
-                             help='Send invoices by email')
-    email_group.add_argument('--smtp-host', help='SMTP server address')
-    email_group.add_argument('--smtp-port', type=int, default=587,
-                             help='SMTP server port (default: 587)')
-    email_group.add_argument('--smtp-user', help='SMTP username')
-    email_group.add_argument('--smtp-password', help='SMTP password')
-    email_group.add_argument('--smtp-password-file', help='File containing SMTP password')
-    email_group.add_argument('--email-from', help='Sender email address')
-    email_group.add_argument('--email-to', action='append', metavar='ADDRESS',
-                             help='Recipient email address (can be specified multiple times)')
-    email_group.add_argument('--email-subject',
-                             default='Faktura KSeF: {invoice_number}',
-                             help='Email subject template (default: "Faktura KSeF: {invoice_number}")')
-    email_group.add_argument('--email-group', choices=['single', 'all'], default='single',
-                             help='Grouping: single (one email per invoice, default) or all (all in one email)')
-
-    args = parser.parse_args()
-
-    # Auto-enable --send-email when SMTP options are provided
-    if args.smtp_host and not args.send_email:
-        args.send_email = True
-
-    # Default --email-from to --smtp-user if not specified
+    # Default email_from to smtp_user if not specified
     if not args.email_from and args.smtp_user:
         args.email_from = args.smtp_user
 
     # Setup logging
-    log_level = logging.DEBUG if args.verbose else logging.WARNING
+    log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(levelname)s - %(message)s'
@@ -1904,11 +1861,11 @@ Examples:
     use_cert_auth = args.cert or args.key
 
     if not args.nip:
-        print("Błąd: --nip jest wymagany dla zapytań KSeF", file=sys.stderr)
+        print("Błąd: 'nip' jest wymagany w config.json dla zapytań KSeF", file=sys.stderr)
         sys.exit(1)
 
     if not use_token_auth and not use_cert_auth:
-        print("Błąd: Wymagane jest podanie tokenu (--token/--token-file) lub certyfikatu (--cert/--key)", file=sys.stderr)
+        print("Błąd: Wymagane jest podanie tokenu (auth.token/auth.token_file) lub certyfikatu (auth.cert/auth.key) w config.json", file=sys.stderr)
         sys.exit(1)
 
     if use_token_auth and use_cert_auth:
@@ -1955,13 +1912,13 @@ Examples:
         try:
             date_from = datetime.datetime.strptime(args.date_from, '%Y-%m-%d').date()
         except ValueError:
-            print(f"Błąd: Nieprawidłowy format daty --date-from: {args.date_from}", file=sys.stderr)
+            print(f"Błąd: Nieprawidłowy format daty query.date_from: {args.date_from}", file=sys.stderr)
             sys.exit(1)
     if args.date_to:
         try:
             date_to = datetime.datetime.strptime(args.date_to, '%Y-%m-%d').date()
         except ValueError:
-            print(f"Błąd: Nieprawidłowy format daty --date-to: {args.date_to}", file=sys.stderr)
+            print(f"Błąd: Nieprawidłowy format daty query.date_to: {args.date_to}", file=sys.stderr)
             sys.exit(1)
 
     try:
@@ -2070,13 +2027,13 @@ Examples:
             # Validate required SMTP arguments
             missing = []
             if not args.smtp_host:
-                missing.append('--smtp-host')
+                missing.append('email.smtp_host')
             if not args.smtp_user:
-                missing.append('--smtp-user')
+                missing.append('email.smtp_user')
             if not args.email_from:
-                missing.append('--email-from')
+                missing.append('email.from')
             if not args.email_to:
-                missing.append('--email-to')
+                missing.append('email.to')
 
             smtp_password = args.smtp_password
             if not smtp_password and args.smtp_password_file:
@@ -2086,10 +2043,10 @@ Examples:
                 with open(args.smtp_password_file, 'r') as f:
                     smtp_password = f.read().strip()
             if not smtp_password:
-                missing.append('--smtp-password or --smtp-password-file')
+                missing.append('email.smtp_password / email.smtp_password_file')
 
             if missing:
-                print(f"Błąd: Brakujące wymagane opcje email: {', '.join(missing)}", file=sys.stderr)
+                print(f"Błąd: Brakujące wymagane pola email w config.json: {', '.join(missing)}", file=sys.stderr)
                 sys.exit(1)
 
             pdf_generator_email = InvoicePDFGenerator()
@@ -2240,6 +2197,22 @@ Examples:
                         logger.debug(f"  Usunięto plik tymczasowy: {tmp_path}")
                     except OSError as e:
                         logger.warning(f"  Nie udało się usunąć pliku tymczasowego {tmp_path}: {e}")
+
+        # Save last acquisition timestamp
+        state_dir = os.path.join('meta')
+        state_path = os.path.join(state_dir, 'state.json')
+        os.makedirs(state_dir, exist_ok=True)
+        state = {}
+        if os.path.exists(state_path):
+            try:
+                with open(state_path, 'r') as f:
+                    state = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        state['last_acquisition_utc'] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        with open(state_path, 'w') as f:
+            json.dump(state, f, indent=2)
+        logger.info(f"Saved acquisition timestamp to {state_path}: {state['last_acquisition_utc']}")
 
         # Terminate session
         print("\nKończenie sesji...")
