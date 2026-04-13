@@ -863,20 +863,23 @@ class InvoicePDFGenerator:
         elements.append(tax_table)
         elements.append(Spacer(1, 6 * mm))
 
-        # === ADNOTACJE ===
+        # === ADNOTACJE (kept together) ===
         annotations = data.get('annotations', [])
         if annotations:
-            self._add_horizontal_line(elements)
-            elements.append(Paragraph("<b>Adnotacje</b>", self.styles['SectionHeader']))
+            ann_section = []
+            self._add_horizontal_line(ann_section)
+            ann_section.append(Paragraph("<b>Adnotacje</b>", self.styles['SectionHeader']))
             for ann in annotations:
-                elements.append(Paragraph(ann, self.styles['CompanyDetails']))
-            elements.append(Spacer(1, 4 * mm))
+                ann_section.append(Paragraph(ann, self.styles['CompanyDetails']))
+            ann_section.append(Spacer(1, 4 * mm))
+            elements.append(KeepTogether(ann_section))
 
-        # === PŁATNOŚĆ ===
+        # === PŁATNOŚĆ (kept together) ===
         payment = data.get('payment', {})
         if any(payment.values()):
-            self._add_horizontal_line(elements)
-            elements.append(Paragraph("<b>Płatność</b>", self.styles['SectionHeader']))
+            pay_section = []
+            self._add_horizontal_line(pay_section)
+            pay_section.append(Paragraph("<b>Płatność</b>", self.styles['SectionHeader']))
 
             payment_info_parts = []
             if payment.get('description'):
@@ -889,17 +892,17 @@ class InvoicePDFGenerator:
                 payment_info_parts.append(f"Forma płatności: {form_display}")
 
             for part in payment_info_parts:
-                elements.append(Paragraph(part, self.styles['CompanyDetails']))
+                pay_section.append(Paragraph(part, self.styles['CompanyDetails']))
 
             if payment.get('bank_account'):
                 line = f"Nr rachunku: {payment['bank_account']}"
                 if payment.get('bank_name'):
                     line += f" ({payment['bank_name']})"
-                elements.append(Paragraph(line, self.styles['CompanyDetails']))
+                pay_section.append(Paragraph(line, self.styles['CompanyDetails']))
 
             # Due dates as a small table
             if payment.get('due_dates'):
-                elements.append(Spacer(1, 2 * mm))
+                pay_section.append(Spacer(1, 2 * mm))
                 due_header = [Paragraph("<b>Termin płatności</b>", self.styles['TableCell'])]
                 due_data = [due_header]
                 for date in payment['due_dates']:
@@ -921,15 +924,17 @@ class InvoicePDFGenerator:
                     ('TOPPADDING', (0, 0), (-1, -1), 0),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
                 ]))
-                elements.append(wrapper)
+                pay_section.append(wrapper)
 
-            elements.append(Spacer(1, 4 * mm))
+            pay_section.append(Spacer(1, 4 * mm))
+            elements.append(KeepTogether(pay_section))
 
-        # === REJESTRY ===
+        # === REJESTRY (kept together) ===
         registry = data.get('registry', {})
         if any(registry.values()):
-            self._add_horizontal_line(elements)
-            elements.append(Paragraph("<b>Rejestry</b>", self.styles['SectionHeader']))
+            reg_section = []
+            self._add_horizontal_line(reg_section)
+            reg_section.append(Paragraph("<b>Rejestry</b>", self.styles['SectionHeader']))
 
             reg_headers = []
             reg_values = []
@@ -957,8 +962,9 @@ class InvoicePDFGenerator:
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                     ('LEFTPADDING', (0, 0), (-1, -1), 3),
                 ]))
-                elements.append(reg_table)
-            elements.append(Spacer(1, 4 * mm))
+                reg_section.append(reg_table)
+            reg_section.append(Spacer(1, 4 * mm))
+            elements.append(KeepTogether(reg_section))
 
         # === DODATKOWE OPISY ===
         additional_descs = data.get('additional_descriptions', [])
