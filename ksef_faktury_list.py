@@ -47,7 +47,9 @@ import io
 import json
 import logging
 import os
+import re
 import smtplib
+import argparse
 import sys
 import tempfile
 import time
@@ -1740,6 +1742,53 @@ def send_grouped_email(
         logger.info(f"Email zbiorczy wysłany pomyślnie ({len(invoices_data)} faktur, {attachment_count} załączników)")
 
 
+def expand_date_template(path_template, date_str=None):
+    """Expand date placeholders in a path template.
+
+    Supported placeholders: YYYY, YY, MM, DD.
+    Example: "output/MM-YYYY/sales" -> "output/04-2026/sales"
+
+    Args:
+        path_template: Path string potentially containing date placeholders.
+        date_str: ISO date string (YYYY-MM-DD...). Uses today if None.
+    """
+    if not any(tok in path_template for tok in ('YYYY', 'YY', 'MM', 'DD')):
+        return path_template
+    if date_str:
+        dt = datetime.datetime.strptime(date_str[:10], '%Y-%m-%d').date()
+    else:
+        dt = datetime.date.today()
+    result = path_template.replace('YYYY', f'{dt.year:04d}')
+    result = result.replace('YY', f'{dt.year % 100:02d}')
+    result = result.replace('MM', f'{dt.month:02d}')
+    result = result.replace('DD', f'{dt.day:02d}')
+    return result
+
+
+def _sanitize_for_filename(text):
+    """Lowercase and strip everything except [a-z0-9]."""
+    return re.sub(r'[^a-z0-9]', '', text.lower())
+
+
+def _extract_seller_and_number(xml_raw):
+    """Extract seller name and invoice number from KSeF XML bytes."""
+    root = etree.fromstring(xml_raw)
+    for elem in root.iter():
+        if '}' in elem.tag:
+            elem.tag = elem.tag.split('}')[1]
+    seller_name = ''
+    podmiot1 = root.find('.//Podmiot1')
+    if podmiot1 is not None:
+        dane = podmiot1.find('DaneIdentyfikacyjne')
+        if dane is not None:
+            seller_name = dane.findtext('Nazwa', '')
+    inv_number = ''
+    fa = root.find('.//Fa')
+    if fa is not None:
+        inv_number = fa.findtext('P_2', '')
+    return seller_name, inv_number
+
+
 def load_config(config_path):
     """Load configuration from JSON file and return a namespace object."""
     if not os.path.exists(config_path):
@@ -1770,14 +1819,15 @@ def load_config(config_path):
     c.token = auth.get('token')
     c.token_file = auth.get('token_file')
     # query
-    c.subject_type = query.get('subject_type', 'Subject2')
+    st = query.get('subject_type', 'Subject2')
+    c.subject_types = st if isinstance(st, list) else [st]
     c.date_from = query.get('date_from')
     c.date_to = query.get('date_to')
     # output
     c.output = output.get('format', 'table')
-    c.download_xml = output.get('download_xml', False)
+    c.download_xml = output.get('download_xml', True)
     c.xml_output_dir = output.get('xml_output_dir', '.')
-    c.download_pdf = output.get('download_pdf', False)
+    c.download_pdf = output.get('download_pdf', True)
     c.pdf_output_dir = output.get('pdf_output_dir', '.')
     # email
     c.send_email = bool(email.get('smtp_host'))
@@ -1795,7 +1845,11 @@ def load_config(config_path):
 
 
 def main():
-    config_path = sys.argv[1] if len(sys.argv) > 1 else 'config.json'
+    parser = argparse.ArgumentParser(description='Pobieranie faktur z KSeF')
+    parser.add_argument('-c', '--config', default='config.json',
+                        help='Ścieżka do pliku konfiguracji (domyślnie: config.json)')
+    cli_args = parser.parse_args()
+    config_path = cli_args.config
     args = load_config(config_path)
 
     # Default email_from to smtp_user if not specified
@@ -1812,7 +1866,7 @@ def main():
     # Offline XML to PDF conversion (no authentication needed)
     if args.xml_to_pdf:
         xml_path = args.xml_to_pdf
-        pdf_output_dir = args.pdf_output_dir
+        pdf_output_dir = expand_date_template(args.pdf_output_dir)
 
         if not os.path.exists(xml_path):
             print(f"Błąd: Ścieżka nie znaleziona: {xml_path}", file=sys.stderr)
@@ -1905,15 +1959,18 @@ def main():
             print(f"Błąd: Plik klucza prywatnego nie znaleziony: {args.key}", file=sys.stderr)
             sys.exit(1)
 
-    # Parse dates
-    date_from = None
-    date_to = None
-    if args.date_from:
+    # Load state for incremental sync
+    state_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'state.json')
+    state = {}
+    if os.path.exists(state_path):
         try:
-            date_from = datetime.datetime.strptime(args.date_from, '%Y-%m-%d').date()
-        except ValueError:
-            print(f"Błąd: Nieprawidłowy format daty query.date_from: {args.date_from}", file=sys.stderr)
-            sys.exit(1)
+            with open(state_path, 'r') as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Parse date_to once (shared across subject types)
+    date_to = None
     if args.date_to:
         try:
             date_to = datetime.datetime.strptime(args.date_to, '%Y-%m-%d').date()
@@ -1949,223 +2006,194 @@ def main():
             session_info = client.init_session_xades(args.nip)
         print(f"Sesja zainicjalizowana. Numer referencyjny: {session_info['reference_number']}")
 
-        # Query invoices
-        subject_type_label = "wystawione (sprzedaż)" if args.subject_type == "Subject1" else "otrzymane (zakupy)"
-        print(f"\nPobieranie faktur {subject_type_label}...")
-        if date_from:
-            print(f"Zakres dat: {date_from} - {date_to or 'dziś'}")
-
-        result = client.query_invoices(
-            subject_type=args.subject_type,
-            date_from=date_from,
-            date_to=date_to
-        )
-
-        invoices = result.get('invoices', [])
-
-        # Output results
-        if args.output == 'json':
-            print_invoices_json(invoices)
-        else:
-            print_invoices_table(invoices)
-
-        # Caches to avoid duplicate KSeF API calls across download-xml, download-pdf, and send-email
+        # Caches to avoid duplicate KSeF API calls across subject types
         xml_cache = {}   # ksef_number -> xml raw bytes
         pdf_cache = {}   # ksef_number -> pdf_path
 
         def get_xml_cached(ksef_number):
             if ksef_number not in xml_cache:
                 xml_cache[ksef_number] = client.get_invoice_xml(ksef_number)
+                time.sleep(1)
             return xml_cache[ksef_number]
 
-        # Download XML if requested
-        if args.download_xml and invoices:
-            print(f"\nPobieranie plików XML do: {args.xml_output_dir}")
-            os.makedirs(args.xml_output_dir, exist_ok=True)
-
-            for inv in invoices:
-                ksef_number = inv.get('ksefNumber')
-                if ksef_number:
-                    try:
-                        xml_raw = get_xml_cached(ksef_number)
-                        # Sanitize filename
-                        safe_name = ksef_number.replace('/', '_').replace('\\', '_')
-                        filepath = os.path.join(args.xml_output_dir, f"{safe_name}.xml")
-                        with open(filepath, 'wb') as f:
-                            f.write(xml_raw)
-                        print(f"  Pobrano: {filepath}")
-                    except KSeFError as e:
-                        print(f"  Błąd pobierania {ksef_number}: {e.message}", file=sys.stderr)
-
-        # Generate PDF if requested
-        if args.download_pdf and invoices:
-            print(f"\nGenerowanie plików PDF do: {args.pdf_output_dir}")
-            os.makedirs(args.pdf_output_dir, exist_ok=True)
-            pdf_generator = InvoicePDFGenerator()
-
-            for inv in invoices:
-                ksef_number = inv.get('ksefNumber')
-                if ksef_number:
-                    try:
-                        xml_raw = get_xml_cached(ksef_number)
-                        xml_text = xml_raw.decode('utf-8')
-                        # Sanitize filename
-                        safe_name = ksef_number.replace('/', '_').replace('\\', '_')
-                        filepath = os.path.join(args.pdf_output_dir, f"{safe_name}.pdf")
-                        pdf_generator.generate_pdf(xml_text, filepath,
-                                                   environment=args.env, ksef_number=ksef_number,
-                                                   xml_raw_bytes=xml_raw)
-                        pdf_cache[ksef_number] = filepath
-                        print(f"  Wygenerowano: {filepath}")
-                    except KSeFError as e:
-                        print(f"  Błąd generowania PDF dla {ksef_number}: {e.message}", file=sys.stderr)
-                    except Exception as e:
-                        print(f"  Błąd generowania PDF dla {ksef_number}: {e}", file=sys.stderr)
-
-        # Send invoices by email if requested
-        if args.send_email and invoices:
-            # Validate required SMTP arguments
-            missing = []
-            if not args.smtp_host:
-                missing.append('email.smtp_host')
-            if not args.smtp_user:
-                missing.append('email.smtp_user')
-            if not args.email_from:
-                missing.append('email.from')
-            if not args.email_to:
-                missing.append('email.to')
-
-            smtp_password = args.smtp_password
-            if not smtp_password and args.smtp_password_file:
-                if not os.path.exists(args.smtp_password_file):
-                    print(f"Błąd: Plik hasła SMTP nie znaleziony: {args.smtp_password_file}", file=sys.stderr)
+        for subject_type in args.subject_types:
+            # Resolve date_from per subject_type
+            date_from = None
+            date_type = 'Invoicing'
+            if args.date_from:
+                try:
+                    date_from = datetime.datetime.strptime(args.date_from, '%Y-%m-%d').date()
+                except ValueError:
+                    print(f"Błąd: Nieprawidłowy format daty query.date_from: {args.date_from}", file=sys.stderr)
                     sys.exit(1)
-                with open(args.smtp_password_file, 'r') as f:
-                    smtp_password = f.read().strip()
-            if not smtp_password:
-                missing.append('email.smtp_password / email.smtp_password_file')
+            else:
+                last_sync = state.get('last_sync_utc', {}).get(subject_type)
+                if last_sync:
+                    date_from = datetime.datetime.strptime(last_sync[:10], '%Y-%m-%d').date()
+                    date_type = 'PermanentStorage'
+                    print(f"Incremental sync od {date_from} (PermanentStorage z state.json)")
 
-            if missing:
-                print(f"Błąd: Brakujące wymagane pola email w config.json: {', '.join(missing)}", file=sys.stderr)
-                sys.exit(1)
+            # Query invoices
+            subject_type_label = "wystawione (sprzedaż)" if subject_type == "Subject1" else "otrzymane (zakupy)"
+            print(f"\nPobieranie faktur {subject_type_label}...")
+            if date_from:
+                print(f"Zakres dat: {date_from} - {date_to or 'dziś'}")
 
-            pdf_generator_email = InvoicePDFGenerator()
-            temp_pdfs = []
+            result = client.query_invoices(
+                subject_type=subject_type,
+                date_from=date_from,
+                date_to=date_to,
+                date_type=date_type
+            )
 
-            logger.info(f"Konfiguracja email: host={args.smtp_host}:{args.smtp_port}, "
-                         f"użytkownik={args.smtp_user}, od={args.email_from}, "
-                         f"do={args.email_to}, grupowanie={args.email_group}")
-            logger.info(f"Szablon tematu: {args.email_subject}")
-            logger.info(f"Liczba faktur do wysłania: {len(invoices)}")
+            invoices = result.get('invoices', [])
 
-            try:
-                print(f"\nWysyłanie faktur emailem (tryb: {args.email_group})...")
+            # Output results
+            if args.output == 'json':
+                print_invoices_json(invoices)
+            else:
+                print_invoices_table(invoices)
 
-                if args.email_group == 'all':
-                    # Collect all invoice data, then send one email
-                    invoices_data = []
-                    for inv in invoices:
-                        ksef_number = inv.get('ksefNumber')
-                        invoice_number = inv.get('invoiceNumber', ksef_number or 'N/A')
-                        if not ksef_number:
-                            logger.warning(f"Pomijanie faktury bez numeru KSeF: {inv}")
-                            continue
+            # Download XML if requested
+            if args.download_xml and invoices:
+                print(f"\nPobieranie plików XML do: {args.xml_output_dir}")
+
+                for inv in invoices:
+                    ksef_number = inv.get('ksefNumber')
+                    if ksef_number:
                         try:
                             xml_raw = get_xml_cached(ksef_number)
-                            logger.info(f"  Pobrano XML dla {ksef_number} ({len(xml_raw)} bajtów)")
+                            xml_dir = expand_date_template(args.xml_output_dir, inv.get('issueDate'))
+                            os.makedirs(xml_dir, exist_ok=True)
+                            safe_name = ksef_number.replace('/', '_').replace('\\', '_')
+                            if subject_type == 'Subject2':
+                                seller_name, inv_number = _extract_seller_and_number(xml_raw)
+                                suffix = '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(seller_name)
+                                safe_name += suffix
+                            filepath = os.path.join(xml_dir, f"{safe_name}.xml")
+                            with open(filepath, 'wb') as f:
+                                f.write(xml_raw)
+                            print(f"  Pobrano: {filepath}")
                         except KSeFError as e:
-                            print(f"  Błąd pobierania XML dla {ksef_number}: {e.message}", file=sys.stderr)
-                            continue
+                            print(f"  Błąd pobierania {ksef_number}: {e.message}", file=sys.stderr)
 
-                        pdf_path = pdf_cache.get(ksef_number)
-                        if pdf_path:
-                            logger.info(f"  PDF z cache dla {ksef_number}: {pdf_path}")
-                        else:
-                            try:
-                                tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
-                                tmp.close()
-                                xml_text = xml_raw.decode('utf-8')
-                                pdf_generator_email.generate_pdf(xml_text, tmp.name,
-                                                                 environment=args.env, ksef_number=ksef_number,
-                                                                 xml_raw_bytes=xml_raw)
-                                pdf_path = tmp.name
-                                pdf_cache[ksef_number] = pdf_path
-                                temp_pdfs.append(tmp.name)
-                                logger.info(f"  Wygenerowano tymczasowy PDF dla {ksef_number}: {tmp.name}")
-                            except Exception as e:
-                                print(f"  Błąd generowania PDF dla {ksef_number}: {e}", file=sys.stderr)
-                                logger.error(f"  Błąd generowania PDF dla {ksef_number}: {e}")
-                                pdf_path = None
+            # Generate PDF if requested
+            if args.download_pdf and invoices:
+                print(f"\nGenerowanie plików PDF do: {args.pdf_output_dir}")
+                pdf_generator = InvoicePDFGenerator()
 
-                        invoices_data.append({
-                            'invoice_number': invoice_number,
-                            'ksef_number': ksef_number,
-                            'xml_content': xml_raw,
-                            'pdf_path': pdf_path,
-                        })
-
-                    if invoices_data:
-                        subject = args.email_subject.format(
-                            invoice_number=f"{len(invoices_data)} faktur"
-                        )
-                        logger.info(f"Wysyłanie zbiorczego emaila z {len(invoices_data)} fakturą/ami...")
-                        send_grouped_email(
-                            smtp_host=args.smtp_host,
-                            smtp_port=args.smtp_port,
-                            smtp_user=args.smtp_user,
-                            smtp_password=smtp_password,
-                            email_from=args.email_from,
-                            email_to=args.email_to,
-                            subject=subject,
-                            invoices_data=invoices_data,
-                        )
-                        print(f"  Wysłano 1 email z {len(invoices_data)} fakturą/ami")
-                    else:
-                        logger.warning("Brak faktur do wysłania w trybie zbiorczym")
-                else:
-                    # Send one email per invoice
-                    sent_count = 0
-                    err_count = 0
-                    for idx, inv in enumerate(invoices, 1):
-                        ksef_number = inv.get('ksefNumber')
-                        invoice_number = inv.get('invoiceNumber', ksef_number or 'N/A')
-                        if not ksef_number:
-                            logger.warning(f"Pomijanie faktury bez numeru KSeF: {inv}")
-                            continue
-
-                        logger.info(f"Przetwarzanie faktury {idx}/{len(invoices)}: {invoice_number} ({ksef_number})")
-
+                for inv in invoices:
+                    ksef_number = inv.get('ksefNumber')
+                    if ksef_number:
                         try:
                             xml_raw = get_xml_cached(ksef_number)
-                            logger.info(f"  Pobrano XML dla {ksef_number} ({len(xml_raw)} bajtów)")
+                            xml_text = xml_raw.decode('utf-8')
+                            pdf_dir = expand_date_template(args.pdf_output_dir, inv.get('issueDate'))
+                            os.makedirs(pdf_dir, exist_ok=True)
+                            safe_name = ksef_number.replace('/', '_').replace('\\', '_')
+                            if subject_type == 'Subject2':
+                                seller_name, inv_number = _extract_seller_and_number(xml_raw)
+                                suffix = '_' + _sanitize_for_filename(inv_number) + '_' + _sanitize_for_filename(seller_name)
+                                safe_name += suffix
+                            filepath = os.path.join(pdf_dir, f"{safe_name}.pdf")
+                            pdf_generator.generate_pdf(xml_text, filepath,
+                                                       environment=args.env, ksef_number=ksef_number,
+                                                       xml_raw_bytes=xml_raw)
+                            pdf_cache[ksef_number] = filepath
+                            print(f"  Wygenerowano: {filepath}")
                         except KSeFError as e:
-                            print(f"  Błąd pobierania XML dla {ksef_number}: {e.message}", file=sys.stderr)
-                            err_count += 1
-                            continue
+                            print(f"  Błąd generowania PDF dla {ksef_number}: {e.message}", file=sys.stderr)
+                        except Exception as e:
+                            print(f"  Błąd generowania PDF dla {ksef_number}: {e}", file=sys.stderr)
 
-                        pdf_path = pdf_cache.get(ksef_number)
-                        if pdf_path:
-                            logger.info(f"  PDF z cache dla {ksef_number}: {pdf_path}")
-                        else:
+            # Send invoices by email if requested
+            if args.send_email and invoices:
+                # Validate required SMTP arguments
+                missing = []
+                if not args.smtp_host:
+                    missing.append('email.smtp_host')
+                if not args.smtp_user:
+                    missing.append('email.smtp_user')
+                if not args.email_from:
+                    missing.append('email.from')
+                if not args.email_to:
+                    missing.append('email.to')
+
+                smtp_password = args.smtp_password
+                if not smtp_password and args.smtp_password_file:
+                    if not os.path.exists(args.smtp_password_file):
+                        print(f"Błąd: Plik hasła SMTP nie znaleziony: {args.smtp_password_file}", file=sys.stderr)
+                        sys.exit(1)
+                    with open(args.smtp_password_file, 'r') as f:
+                        smtp_password = f.read().strip()
+                if not smtp_password:
+                    missing.append('email.smtp_password / email.smtp_password_file')
+
+                if missing:
+                    print(f"Błąd: Brakujące wymagane pola email w config.json: {', '.join(missing)}", file=sys.stderr)
+                    sys.exit(1)
+
+                pdf_generator_email = InvoicePDFGenerator()
+                temp_pdfs = []
+
+                logger.info(f"Konfiguracja email: host={args.smtp_host}:{args.smtp_port}, "
+                             f"użytkownik={args.smtp_user}, od={args.email_from}, "
+                             f"do={args.email_to}, grupowanie={args.email_group}")
+                logger.info(f"Szablon tematu: {args.email_subject}")
+                logger.info(f"Liczba faktur do wysłania: {len(invoices)}")
+
+                try:
+                    print(f"\nWysyłanie faktur emailem (tryb: {args.email_group})...")
+
+                    if args.email_group == 'all':
+                        # Collect all invoice data, then send one email
+                        invoices_data = []
+                        for inv in invoices:
+                            ksef_number = inv.get('ksefNumber')
+                            invoice_number = inv.get('invoiceNumber', ksef_number or 'N/A')
+                            if not ksef_number:
+                                logger.warning(f"Pomijanie faktury bez numeru KSeF: {inv}")
+                                continue
                             try:
-                                tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
-                                tmp.close()
-                                xml_text = xml_raw.decode('utf-8')
-                                pdf_generator_email.generate_pdf(xml_text, tmp.name,
-                                                                 environment=args.env, ksef_number=ksef_number,
-                                                                 xml_raw_bytes=xml_raw)
-                                pdf_path = tmp.name
-                                pdf_cache[ksef_number] = pdf_path
-                                temp_pdfs.append(tmp.name)
-                                logger.info(f"  Wygenerowano tymczasowy PDF dla {ksef_number}: {tmp.name}")
-                            except Exception as e:
-                                print(f"  Błąd generowania PDF dla {ksef_number}: {e}", file=sys.stderr)
-                                logger.error(f"  Błąd generowania PDF dla {ksef_number}: {e}")
-                                pdf_path = None
+                                xml_raw = get_xml_cached(ksef_number)
+                                logger.info(f"  Pobrano XML dla {ksef_number} ({len(xml_raw)} bajtów)")
+                            except KSeFError as e:
+                                print(f"  Błąd pobierania XML dla {ksef_number}: {e.message}", file=sys.stderr)
+                                continue
 
-                        subject = args.email_subject.format(invoice_number=invoice_number)
-                        try:
-                            send_invoice_email(
+                            pdf_path = pdf_cache.get(ksef_number)
+                            if pdf_path:
+                                logger.info(f"  PDF z cache dla {ksef_number}: {pdf_path}")
+                            else:
+                                try:
+                                    tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+                                    tmp.close()
+                                    xml_text = xml_raw.decode('utf-8')
+                                    pdf_generator_email.generate_pdf(xml_text, tmp.name,
+                                                                     environment=args.env, ksef_number=ksef_number,
+                                                                     xml_raw_bytes=xml_raw)
+                                    pdf_path = tmp.name
+                                    pdf_cache[ksef_number] = pdf_path
+                                    temp_pdfs.append(tmp.name)
+                                    logger.info(f"  Wygenerowano tymczasowy PDF dla {ksef_number}: {tmp.name}")
+                                except Exception as e:
+                                    print(f"  Błąd generowania PDF dla {ksef_number}: {e}", file=sys.stderr)
+                                    logger.error(f"  Błąd generowania PDF dla {ksef_number}: {e}")
+                                    pdf_path = None
+
+                            invoices_data.append({
+                                'invoice_number': invoice_number,
+                                'ksef_number': ksef_number,
+                                'xml_content': xml_raw,
+                                'pdf_path': pdf_path,
+                            })
+
+                        if invoices_data:
+                            subject = args.email_subject.format(
+                                invoice_number=f"{len(invoices_data)} faktur"
+                            )
+                            logger.info(f"Wysyłanie zbiorczego emaila z {len(invoices_data)} fakturą/ami...")
+                            send_grouped_email(
                                 smtp_host=args.smtp_host,
                                 smtp_port=args.smtp_port,
                                 smtp_user=args.smtp_user,
@@ -2173,46 +2201,99 @@ def main():
                                 email_from=args.email_from,
                                 email_to=args.email_to,
                                 subject=subject,
-                                invoice_number=invoice_number,
-                                ksef_number=ksef_number,
-                                xml_content=xml_raw,
-                                pdf_path=pdf_path,
+                                invoices_data=invoices_data,
                             )
-                            sent_count += 1
-                            print(f"  Wysłano: {invoice_number} ({ksef_number})")
-                        except Exception as e:
-                            err_count += 1
-                            print(f"  Błąd wysyłania emaila dla {ksef_number}: {e}", file=sys.stderr)
-                            logger.error(f"  Błąd SMTP dla {ksef_number}: {e}")
+                            print(f"  Wysłano 1 email z {len(invoices_data)} fakturą/ami")
+                        else:
+                            logger.warning("Brak faktur do wysłania w trybie zbiorczym")
+                    else:
+                        # Send one email per invoice
+                        sent_count = 0
+                        err_count = 0
+                        for idx, inv in enumerate(invoices, 1):
+                            ksef_number = inv.get('ksefNumber')
+                            invoice_number = inv.get('invoiceNumber', ksef_number or 'N/A')
+                            if not ksef_number:
+                                logger.warning(f"Pomijanie faktury bez numeru KSeF: {inv}")
+                                continue
 
-                    print(f"  Wysłano {sent_count} email(i)" + (f", błędy: {err_count}" if err_count else ""))
+                            logger.info(f"Przetwarzanie faktury {idx}/{len(invoices)}: {invoice_number} ({ksef_number})")
 
-            finally:
-                # Clean up temporary PDFs
-                if temp_pdfs:
-                    logger.info(f"Usuwanie {len(temp_pdfs)} tymczasowych plików PDF")
-                for tmp_path in temp_pdfs:
-                    try:
-                        os.unlink(tmp_path)
-                        logger.debug(f"  Usunięto plik tymczasowy: {tmp_path}")
-                    except OSError as e:
-                        logger.warning(f"  Nie udało się usunąć pliku tymczasowego {tmp_path}: {e}")
+                            try:
+                                xml_raw = get_xml_cached(ksef_number)
+                                logger.info(f"  Pobrano XML dla {ksef_number} ({len(xml_raw)} bajtów)")
+                            except KSeFError as e:
+                                print(f"  Błąd pobierania XML dla {ksef_number}: {e.message}", file=sys.stderr)
+                                err_count += 1
+                                continue
 
-        # Save last acquisition timestamp
-        state_dir = os.path.join('meta')
-        state_path = os.path.join(state_dir, 'state.json')
-        os.makedirs(state_dir, exist_ok=True)
-        state = {}
-        if os.path.exists(state_path):
-            try:
-                with open(state_path, 'r') as f:
-                    state = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                pass
-        state['last_acquisition_utc'] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        with open(state_path, 'w') as f:
-            json.dump(state, f, indent=2)
-        logger.info(f"Saved acquisition timestamp to {state_path}: {state['last_acquisition_utc']}")
+                            pdf_path = pdf_cache.get(ksef_number)
+                            if pdf_path:
+                                logger.info(f"  PDF z cache dla {ksef_number}: {pdf_path}")
+                            else:
+                                try:
+                                    tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+                                    tmp.close()
+                                    xml_text = xml_raw.decode('utf-8')
+                                    pdf_generator_email.generate_pdf(xml_text, tmp.name,
+                                                                     environment=args.env, ksef_number=ksef_number,
+                                                                     xml_raw_bytes=xml_raw)
+                                    pdf_path = tmp.name
+                                    pdf_cache[ksef_number] = pdf_path
+                                    temp_pdfs.append(tmp.name)
+                                    logger.info(f"  Wygenerowano tymczasowy PDF dla {ksef_number}: {tmp.name}")
+                                except Exception as e:
+                                    print(f"  Błąd generowania PDF dla {ksef_number}: {e}", file=sys.stderr)
+                                    logger.error(f"  Błąd generowania PDF dla {ksef_number}: {e}")
+                                    pdf_path = None
+
+                            subject = args.email_subject.format(invoice_number=invoice_number)
+                            try:
+                                send_invoice_email(
+                                    smtp_host=args.smtp_host,
+                                    smtp_port=args.smtp_port,
+                                    smtp_user=args.smtp_user,
+                                    smtp_password=smtp_password,
+                                    email_from=args.email_from,
+                                    email_to=args.email_to,
+                                    subject=subject,
+                                    invoice_number=invoice_number,
+                                    ksef_number=ksef_number,
+                                    xml_content=xml_raw,
+                                    pdf_path=pdf_path,
+                                )
+                                sent_count += 1
+                                print(f"  Wysłano: {invoice_number} ({ksef_number})")
+                            except Exception as e:
+                                err_count += 1
+                                print(f"  Błąd wysyłania emaila dla {ksef_number}: {e}", file=sys.stderr)
+                                logger.error(f"  Błąd SMTP dla {ksef_number}: {e}")
+
+                        print(f"  Wysłano {sent_count} email(i)" + (f", błędy: {err_count}" if err_count else ""))
+
+                finally:
+                    # Clean up temporary PDFs
+                    if temp_pdfs:
+                        logger.info(f"Usuwanie {len(temp_pdfs)} tymczasowych plików PDF")
+                    for tmp_path in temp_pdfs:
+                        try:
+                            os.unlink(tmp_path)
+                            logger.debug(f"  Usunięto plik tymczasowy: {tmp_path}")
+                        except OSError as e:
+                            logger.warning(f"  Nie udało się usunąć pliku tymczasowego {tmp_path}: {e}")
+
+            # Save max acquisitionTimestamp (PermanentStorage date) per subject_type
+            if invoices:
+                max_acq = max(
+                    (inv.get('acquisitionTimestamp', '') for inv in invoices),
+                    default=''
+                )
+                if max_acq:
+                    last_sync_map = state.setdefault('last_sync_utc', {})
+                    last_sync_map[subject_type] = max_acq
+                    with open(state_path, 'w') as f:
+                        json.dump(state, f, indent=2)
+                    logger.info(f"Saved max acquisitionTimestamp for {subject_type}: {max_acq}")
 
         # Terminate session
         print("\nKończenie sesji...")
