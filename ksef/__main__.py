@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -28,6 +29,8 @@ def main():
     parser = argparse.ArgumentParser(description='Pobieranie faktur z KSeF')
     parser.add_argument('-c', '--config', default='config.json',
                         help='Ścieżka do pliku konfiguracji (domyślnie: config.json)')
+    parser.add_argument('--rerender', action='store_true',
+                        help='Ponowne generowanie PDF z istniejących plików XML (bez pobierania z KSeF)')
     cli_args = parser.parse_args()
     config_path = cli_args.config
     args = load_config(config_path)
@@ -92,6 +95,103 @@ def main():
 
         print(f"\nGotowe. Skonwertowano: {ok_count}, błędy: {err_count}")
         sys.exit(0 if err_count == 0 else 1)
+
+    # Re-render all existing XML files to PDF (no download)
+    if cli_args.rerender:
+        xml_output_dir = args.xml_output_dir
+        pdf_output_dir = args.pdf_output_dir
+
+        if not xml_output_dir:
+            print("Błąd: Brak 'output.xml_output_dir' w config.json — nie wiadomo skąd czytać XML",
+                  file=sys.stderr)
+            sys.exit(1)
+        if not pdf_output_dir:
+            print("Błąd: Brak 'output.pdf_output_dir' w config.json — nie wiadomo gdzie zapisać PDF",
+                  file=sys.stderr)
+            sys.exit(1)
+
+        # Resolve per-subject dirs; collect all (xml_dir, pdf_dir) pairs
+        dir_pairs = []
+        if isinstance(xml_output_dir, dict) and isinstance(pdf_output_dir, dict):
+            for subject_type in xml_output_dir:
+                xd = xml_output_dir[subject_type]
+                pd = pdf_output_dir.get(subject_type)
+                if xd and pd:
+                    dir_pairs.append((xd, pd))
+        elif isinstance(xml_output_dir, dict):
+            for subject_type, xd in xml_output_dir.items():
+                dir_pairs.append((xd, pdf_output_dir))
+        elif isinstance(pdf_output_dir, dict):
+            for subject_type, pd in pdf_output_dir.items():
+                dir_pairs.append((xml_output_dir, pd))
+        else:
+            dir_pairs.append((xml_output_dir, pdf_output_dir))
+
+        pdf_generator = InvoicePDFGenerator()
+        total_ok = 0
+        total_err = 0
+
+        for xml_dir_template, pdf_dir_template in dir_pairs:
+            # Walk directory tree to find all XML files (templates may contain
+            # date placeholders that have already been expanded to actual dirs)
+            # Find the static prefix before any placeholder
+            static_prefix = xml_dir_template.split('YYYY')[0].split('MM')[0].split('DD')[0].rstrip('/')
+            if not static_prefix:
+                static_prefix = '.'
+            if not os.path.isdir(static_prefix):
+                print(f"  Katalog nie istnieje: {static_prefix}", file=sys.stderr)
+                continue
+
+            xml_files = []
+            for dirpath, _dirnames, filenames in os.walk(static_prefix):
+                for fn in filenames:
+                    if fn.lower().endswith('.xml'):
+                        xml_files.append(os.path.join(dirpath, fn))
+            xml_files.sort()
+
+            if not xml_files:
+                print(f"  Brak plików XML w: {static_prefix}")
+                continue
+
+            print(f"Ponowne generowanie PDF z {len(xml_files)} plików XML w {static_prefix}...")
+
+            for xml_file in xml_files:
+                try:
+                    with open(xml_file, 'rb') as f:
+                        xml_raw = f.read()
+                    xml_content = xml_raw.decode('utf-8')
+                    base_name = os.path.splitext(os.path.basename(xml_file))[0]
+
+                    # Derive matching PDF output dir from the XML file's relative path
+                    rel_dir = os.path.relpath(os.path.dirname(xml_file), static_prefix)
+                    pdf_static_prefix = pdf_dir_template.split('YYYY')[0].split('MM')[0].split('DD')[0].rstrip('/')
+                    if not pdf_static_prefix:
+                        pdf_static_prefix = '.'
+                    pdf_dir = os.path.join(pdf_static_prefix, rel_dir)
+                    # Replace /xml/ with /pdf/ in the path if applicable
+                    pdf_dir = pdf_dir.replace('/xml/', '/pdf/').replace('/xml', '/pdf')
+                    os.makedirs(pdf_dir, exist_ok=True)
+
+                    pdf_path = os.path.join(pdf_dir, f"{base_name}.pdf")
+                    ksef_number = base_name.split('_')[0] if '_' in base_name else base_name
+                    # Try to reconstruct full KSeF number from filename (before first descriptive suffix)
+                    # Filenames look like: 9522246503-20260407-941ED2800001-30_ndly-2_4_2026_koibanx_ltd
+                    # The KSeF number is the part matching NIP-DATE-HEX-HEX pattern
+                    m = re.match(r'^(\d{10}-\d{8}-[A-F0-9]+-[A-F0-9]+)', base_name, re.IGNORECASE)
+                    if m:
+                        ksef_number = m.group(1)
+
+                    pdf_generator.generate_pdf(xml_content, pdf_path,
+                                               environment=args.env, ksef_number=ksef_number,
+                                               xml_raw_bytes=xml_raw)
+                    print(f"  OK: {xml_file} -> {pdf_path}")
+                    total_ok += 1
+                except Exception as e:
+                    print(f"  Błąd: {xml_file}: {e}", file=sys.stderr)
+                    total_err += 1
+
+        print(f"\nGotowe. Skonwertowano: {total_ok}, błędy: {total_err}")
+        sys.exit(0 if total_err == 0 else 1)
 
     # Determine authentication method
     use_token_auth = args.token or args.token_file
