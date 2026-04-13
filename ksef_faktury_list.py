@@ -1825,10 +1825,10 @@ def load_config(config_path):
     c.date_to = query.get('date_to')
     # output
     c.output = output.get('format', 'table')
-    c.download_xml = output.get('download_xml', True)
-    c.xml_output_dir = output.get('xml_output_dir', '.')
-    c.download_pdf = output.get('download_pdf', True)
-    c.pdf_output_dir = output.get('pdf_output_dir', '.')
+    c.xml_output_dir = output.get('xml_output_dir')
+    c.download_xml = output.get('download_xml', bool(c.xml_output_dir))
+    c.pdf_output_dir = output.get('pdf_output_dir')
+    c.download_pdf = output.get('download_pdf', bool(c.pdf_output_dir))
     # email
     c.send_email = bool(email.get('smtp_host'))
     c.smtp_host = email.get('smtp_host')
