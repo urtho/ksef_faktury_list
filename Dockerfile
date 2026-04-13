@@ -22,13 +22,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
+COPY ksef/ ksef/
 COPY ksef_faktury_list.py .
 
 # Create directories for certificates and output
 RUN mkdir -p /certs /output
 
 # Set entrypoint
-ENTRYPOINT ["python", "ksef_faktury_list.py"]
+ENTRYPOINT ["python", "-m", "ksef"]
 
 # Default help command
 CMD ["--help"]
