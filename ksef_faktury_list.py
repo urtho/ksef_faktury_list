@@ -176,6 +176,10 @@ class KSeFClient:
         self.refresh_token = None
         self.reference_number = None
 
+        # Stored for re-authorization on 401
+        self._nip = None
+        self._reauthorizing = False
+
         # Loaded certificate and key (lazy loading)
         self._certificate = None
         self._private_key = None
@@ -369,6 +373,15 @@ class KSeFClient:
             logger.debug(f"KSeF Response body: {response.text[:2000] if response.text else 'EMPTY'}")
 
             content_type = response.headers.get('Content-Type', '')
+
+            if response.status_code == 401 and with_session and not self._reauthorizing:
+                self._reauthorizing = True
+                try:
+                    self._reauthorize()
+                finally:
+                    self._reauthorizing = False
+                return self._make_request(method, endpoint, data=data, xml_data=xml_data,
+                                          with_session=with_session, accept=accept)
 
             if response.status_code >= 400:
                 error_msg = f"KSeF API Error: HTTP {response.status_code}"
@@ -693,6 +706,8 @@ class KSeFClient:
         if not self._ksef_token:
             raise KSeFError("No KSeF token configured. Use from_token() or provide token parameter.")
 
+        self._nip = nip
+
         # Step 1: Get challenge
         logger.info(f"Getting challenge for NIP: {nip}")
         challenge_response = self.get_authorisation_challenge(nip)
@@ -792,6 +807,8 @@ class KSeFClient:
         Returns:
             dict with access_token, refresh_token and reference_number
         """
+        self._nip = nip
+
         # Step 1: Get challenge
         logger.info(f"Getting challenge for NIP: {nip}")
         challenge_response = self.get_authorisation_challenge(nip)
@@ -902,6 +919,29 @@ class KSeFClient:
 
         return response
 
+    def _reauthorize(self):
+        """Re-initialize the session after a 401 (session expired)."""
+        if not self._nip:
+            raise KSeFError("Cannot reauthorize: NIP not set (no prior session)")
+
+        logger.warning("Session expired (HTTP 401). Re-authorizing...")
+
+        # Reset session state
+        self.authentication_token = None
+        self.access_token = None
+        self.refresh_token = None
+        self.reference_number = None
+        self._public_key_pem = None
+
+        if self._ksef_token:
+            self.init_session_token(self._nip)
+        elif self.cert_path and self.key_path:
+            self.init_session_xades(self._nip)
+        else:
+            raise KSeFError("Cannot reauthorize: no credentials available")
+
+        logger.info("Re-authorization successful.")
+
     def terminate_session(self) -> dict:
         """Terminate active KSeF session."""
         if not self.access_token:
@@ -993,6 +1033,14 @@ class KSeFClient:
         logger.info(f"KSeF XML download: GET {url}")
         response = self._send_http('GET', url, headers)
         logger.info(f"KSeF XML download response: {response.status_code}, {len(response.content)} bytes")
+
+        if response.status_code == 401 and not self._reauthorizing:
+            self._reauthorizing = True
+            try:
+                self._reauthorize()
+            finally:
+                self._reauthorizing = False
+            return self.get_invoice_xml(ksef_number)
 
         if response.status_code >= 400:
             raise KSeFError(
