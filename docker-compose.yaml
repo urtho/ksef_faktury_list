@@ -2,14 +2,10 @@ services:
   ksef:
     build: .
     volumes:
+      - ./config.json:/app/config.json:ro
       - ./certs:/certs:ro
       - ./output:/output
       - ./meta:/app/meta
     command:
-      - --nip
-      - "9522246503"
-      - --token-file
-      - /certs/token.txt
-      - --download-pdf
-      - --pdf-output-dir
-      - /output
+      - -c
+      - /app/config.json

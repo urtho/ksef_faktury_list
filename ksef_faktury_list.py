@@ -1828,8 +1828,7 @@ def _extract_invoice_parties(xml_raw):
 def load_config(config_path):
     """Load configuration from JSON file and return a namespace object."""
     if not os.path.exists(config_path):
-        print(f"Błąd: Plik konfiguracji nie znaleziony: {config_path}", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"Plik konfiguracji nie znaleziony: {config_path}")
 
     with open(config_path, 'r') as f:
         cfg = json.load(f)
