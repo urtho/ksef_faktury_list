@@ -27,6 +27,105 @@ logger = logging.getLogger(__name__)
 _FONT_REGISTERED = False
 _FONT_NAME = 'Helvetica'  # fallback
 
+# ISO 3166-1 alpha-2 country code to Polish name mapping
+COUNTRY_NAMES_PL = {
+    'AD': 'Andora', 'AE': 'Zjednoczone Emiraty Arabskie', 'AF': 'Afganistan',
+    'AG': 'Antigua i Barbuda', 'AL': 'Albania', 'AM': 'Armenia', 'AO': 'Angola',
+    'AR': 'Argentyna', 'AT': 'Austria', 'AU': 'Australia', 'AZ': 'Azerbejd\u017can',
+    'BA': 'Bo\u015bnia i Hercegowina', 'BB': 'Barbados', 'BD': 'Bangladesz',
+    'BE': 'Belgia', 'BG': 'Bu\u0142garia', 'BH': 'Bahrajn', 'BI': 'Burundi',
+    'BJ': 'Benin', 'BM': 'Bermudy', 'BN': 'Brunei', 'BO': 'Boliwia',
+    'BR': 'Brazylia', 'BS': 'Bahamy', 'BT': 'Bhutan', 'BW': 'Botswana',
+    'BY': 'Bia\u0142oru\u015b', 'BZ': 'Belize', 'CA': 'Kanada', 'CD': 'DR Konga',
+    'CF': 'Republika \u015arodkowoafryka\u0144ska', 'CG': 'Kongo',
+    'CH': 'Szwajcaria', 'CI': 'Wybrze\u017ce Ko\u015bci S\u0142oniowej',
+    'CL': 'Chile', 'CM': 'Kamerun', 'CN': 'Chiny', 'CO': 'Kolumbia',
+    'CR': 'Kostaryka', 'CU': 'Kuba', 'CV': 'Republika Zielonego Przyl\u0105dka',
+    'CY': 'Cypr', 'CZ': 'Czechy', 'DE': 'Niemcy', 'DJ': 'D\u017cibuti',
+    'DK': 'Dania', 'DM': 'Dominika', 'DO': 'Dominikana', 'DZ': 'Algieria',
+    'EC': 'Ekwador', 'EE': 'Estonia', 'EG': 'Egipt', 'ER': 'Erytrea',
+    'ES': 'Hiszpania', 'ET': 'Etiopia', 'FI': 'Finlandia', 'FJ': 'Fid\u017ci',
+    'FR': 'Francja', 'GA': 'Gabon', 'GB': 'Wielka Brytania', 'GD': 'Grenada',
+    'GE': 'Gruzja', 'GH': 'Ghana', 'GM': 'Gambia', 'GN': 'Gwinea',
+    'GQ': 'Gwinea R\u00f3wnikowa', 'GR': 'Grecja', 'GT': 'Gwatemala',
+    'GW': 'Gwinea Bissau', 'GY': 'Gujana', 'HK': 'Hongkong', 'HN': 'Honduras',
+    'HR': 'Chorwacja', 'HT': 'Haiti', 'HU': 'W\u0119gry', 'ID': 'Indonezja',
+    'IE': 'Irlandia', 'IL': 'Izrael', 'IN': 'Indie', 'IQ': 'Irak',
+    'IR': 'Iran', 'IS': 'Islandia', 'IT': 'W\u0142ochy', 'JM': 'Jamajka',
+    'JO': 'Jordania', 'JP': 'Japonia', 'KE': 'Kenia', 'KG': 'Kirgistan',
+    'KH': 'Kambod\u017ca', 'KI': 'Kiribati', 'KM': 'Komory',
+    'KN': 'Saint Kitts i Nevis', 'KP': 'Korea P\u00f3\u0142nocna',
+    'KR': 'Korea Po\u0142udniowa', 'KW': 'Kuwejt', 'KY': 'Kajmany',
+    'KZ': 'Kazachstan', 'LA': 'Laos', 'LB': 'Liban', 'LC': 'Saint Lucia',
+    'LI': 'Liechtenstein', 'LK': 'Sri Lanka', 'LR': 'Liberia', 'LS': 'Lesotho',
+    'LT': 'Litwa', 'LU': 'Luksemburg', 'LV': '\u0141otwa', 'LY': 'Libia',
+    'MA': 'Maroko', 'MC': 'Monako', 'MD': 'Mo\u0142dawia', 'ME': 'Czarnog\u00f3ra',
+    'MG': 'Madagaskar', 'MK': 'Macedonia P\u00f3\u0142nocna', 'ML': 'Mali',
+    'MM': 'Mjanma', 'MN': 'Mongolia', 'MR': 'Mauretania', 'MT': 'Malta',
+    'MU': 'Mauritius', 'MV': 'Malediwy', 'MW': 'Malawi', 'MX': 'Meksyk',
+    'MY': 'Malezja', 'MZ': 'Mozambik', 'NA': 'Namibia', 'NE': 'Niger',
+    'NG': 'Nigeria', 'NI': 'Nikaragua', 'NL': 'Holandia', 'NO': 'Norwegia',
+    'NP': 'Nepal', 'NR': 'Nauru', 'NZ': 'Nowa Zelandia', 'OM': 'Oman',
+    'PA': 'Panama', 'PE': 'Peru', 'PG': 'Papua-Nowa Gwinea', 'PH': 'Filipiny',
+    'PK': 'Pakistan', 'PL': 'Polska', 'PT': 'Portugalia', 'PW': 'Palau',
+    'PY': 'Paragwaj', 'QA': 'Katar', 'RO': 'Rumunia', 'RS': 'Serbia',
+    'RU': 'Rosja', 'RW': 'Rwanda', 'SA': 'Arabia Saudyjska',
+    'SB': 'Wyspy Salomona', 'SC': 'Seszele', 'SD': 'Sudan',
+    'SE': 'Szwecja', 'SG': 'Singapur', 'SI': 'S\u0142owenia', 'SK': 'S\u0142owacja',
+    'SL': 'Sierra Leone', 'SM': 'San Marino', 'SN': 'Senegal', 'SO': 'Somalia',
+    'SR': 'Surinam', 'SS': 'Sudan Po\u0142udniowy',
+    'ST': 'Wyspy \u015awi\u0119tego Tomasza i Ksi\u0105\u017c\u0119ca',
+    'SV': 'Salwador', 'SY': 'Syria', 'SZ': 'Eswatini',
+    'TD': 'Czad', 'TG': 'Togo', 'TH': 'Tajlandia', 'TJ': 'Tad\u017cykistan',
+    'TL': 'Timor Wschodni', 'TM': 'Turkmenistan', 'TN': 'Tunezja',
+    'TO': 'Tonga', 'TR': 'Turcja', 'TT': 'Trynidad i Tobago', 'TV': 'Tuvalu',
+    'TW': 'Tajwan', 'TZ': 'Tanzania', 'UA': 'Ukraina', 'UG': 'Uganda',
+    'US': 'Stany Zjednoczone', 'UY': 'Urugwaj', 'UZ': 'Uzbekistan',
+    'VA': 'Watykan', 'VC': 'Saint Vincent i Grenadyny', 'VE': 'Wenezuela',
+    'VG': 'Wyspy Dziewicze-W.B.', 'VI': 'Wyspy Dziewicze-USA', 'VN': 'Wietnam',
+    'VU': 'Vanuatu', 'WS': 'Samoa', 'YE': 'Jemen', 'ZA': 'Republika Po\u0142udniowej Afryki',
+    'ZM': 'Zambia', 'ZW': 'Zimbabwe',
+}
+
+# Payment form codes per KSeF specification
+PAYMENT_FORM_NAMES = {
+    '1': 'Got\u00f3wka', '2': 'Karta', '3': 'Bon', '4': 'Czek',
+    '5': 'Kredyt', '6': 'Przelew', '7': 'Mobilna',
+}
+
+# Annotation labels for adnotacje fields
+ANNOTATION_LABELS = {
+    'P_16': ('Metoda kasowa', {
+        '1': 'TAK', '2': 'NIE',
+    }),
+    'P_17': ('Samofakturowanie', {
+        '1': 'TAK', '2': 'NIE',
+    }),
+    'P_18': ('Odwrotne obci\u0105\u017cenie', {
+        '1': 'TAK', '2': 'NIE',
+    }),
+    'P_18A': ('Mechanizm podzielonej p\u0142atno\u015bci', {
+        '1': 'TAK', '2': 'NIE',
+    }),
+    'P_23': ('Faktura VAT mar\u017ca', {
+        '1': 'TAK', '2': 'NIE',
+    }),
+}
+
+# VAT rate labels for tax summary
+VAT_RATE_LABELS = {
+    'P_13_1': '23%',
+    'P_13_2': '8%',
+    'P_13_3': '5%',
+    'P_13_4': '7%',
+    'P_13_5': '4%',
+    'P_13_6_1': '0%',
+    'P_13_6_2': '0% (WDT)',
+    'P_13_6_3': '0% (eksport)',
+    'P_13_7': 'zw',
+    'P_13_8': 'np z wy\u0142\u0105czeniem art. 100 ust 1 pkt 4 ustawy',
+}
+
 
 def _register_polish_font():
     """Register font with Polish characters support."""
@@ -79,20 +178,46 @@ class InvoicePDFGenerator:
                 self.styles[style_name].fontName = self.font_name
 
         self.styles.add(ParagraphStyle(
+            name='MainTitle',
+            fontName=self.font_name,
+            fontSize=18,
+            leading=22,
+            spaceBefore=0,
+            spaceAfter=2,
+        ))
+        self.styles.add(ParagraphStyle(
             name='InvoiceTitle',
             fontName=self.font_name,
             fontSize=16,
             leading=20,
-            alignment=1,  # center
-            spaceAfter=10,
+            alignment=2,  # right
+            spaceAfter=2,
+        ))
+        self.styles.add(ParagraphStyle(
+            name='InvoiceSubtitle',
+            fontName=self.font_name,
+            fontSize=10,
+            leading=12,
+            alignment=2,  # right
+            spaceAfter=2,
+            textColor=colors.HexColor('#333333'),
         ))
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
             fontName=self.font_name,
-            fontSize=11,
-            leading=14,
-            spaceBefore=10,
-            spaceAfter=5,
+            fontSize=12,
+            leading=15,
+            spaceBefore=8,
+            spaceAfter=4,
+            textColor=colors.HexColor('#000000'),
+        ))
+        self.styles.add(ParagraphStyle(
+            name='SubSectionHeader',
+            fontName=self.font_name,
+            fontSize=10,
+            leading=12,
+            spaceBefore=4,
+            spaceAfter=2,
             textColor=colors.HexColor('#333333'),
         ))
         self.styles.add(ParagraphStyle(
@@ -106,6 +231,13 @@ class InvoicePDFGenerator:
             fontName=self.font_name,
             fontSize=9,
             leading=11,
+            textColor=colors.HexColor('#333333'),
+        ))
+        self.styles.add(ParagraphStyle(
+            name='DetailsLabel',
+            fontName=self.font_name,
+            fontSize=9,
+            leading=11,
             textColor=colors.HexColor('#555555'),
         ))
         self.styles.add(ParagraphStyle(
@@ -115,38 +247,32 @@ class InvoicePDFGenerator:
             leading=10,
             textColor=colors.HexColor('#666666'),
         ))
-
-    def _get_text(self, element, xpath: str, default: str = '') -> str:
-        """Extract text from XML element using xpath."""
-        # Try with namespace prefix
-        for prefix, ns in self.NAMESPACES.items():
-            try:
-                result = element.find(xpath.replace('//', f'//{prefix}:').replace('/', f'/{prefix}:'),
-                                      {prefix: ns})
-                if result is not None and result.text:
-                    return result.text.strip()
-            except Exception:
-                pass
-
-        # Try without namespace (some XMLs don't use prefixes)
-        try:
-            # Remove namespace from element for search
-            for elem in element.iter():
-                if '}' in elem.tag:
-                    elem.tag = elem.tag.split('}')[1]
-            result = element.find(xpath.lstrip('/'))
-            if result is not None and result.text:
-                return result.text.strip()
-        except Exception:
-            pass
-
-        return default
+        self.styles.add(ParagraphStyle(
+            name='TableCell',
+            fontName=self.font_name,
+            fontSize=8,
+            leading=10,
+        ))
+        self.styles.add(ParagraphStyle(
+            name='TableCellRight',
+            fontName=self.font_name,
+            fontSize=8,
+            leading=10,
+            alignment=2,  # right
+        ))
+        self.styles.add(ParagraphStyle(
+            name='TotalRight',
+            fontName=self.font_name,
+            fontSize=10,
+            leading=12,
+            alignment=2,  # right
+            spaceBefore=4,
+            spaceAfter=4,
+        ))
 
     def _parse_xml(self, xml_content: str) -> dict:
         """Parse KSeF XML invoice into dictionary."""
-        # Remove namespace prefixes for easier parsing
-        xml_clean = xml_content
-        root = etree.fromstring(xml_clean.encode('utf-8'))
+        root = etree.fromstring(xml_content.encode('utf-8'))
 
         # Strip namespaces from tags for easier access
         for elem in root.iter():
@@ -156,23 +282,36 @@ class InvoicePDFGenerator:
         data = {
             'invoice_number': '',
             'invoice_date': '',
+            'issue_place': '',
             'currency': 'PLN',
+            'invoice_type': 'VAT',
             'seller': {},
             'buyer': {},
             'items': [],
             'summary': {},
             'payment': {},
             'additional_descriptions': [],
+            'annotations': [],
             'pricing_type': 'net',
-            'footer': [],
+            'footer_texts': [],
+            'registry': {},
+            'exchange_rate': None,
         }
 
-        # Invoice number and date
+        # Header info
+        naglowek = root.find('.//Naglowek')
+        if naglowek is not None:
+            data['system_info'] = naglowek.findtext('SystemInfo', '')
+            data['creation_date'] = naglowek.findtext('DataWytworzeniaFa', '')
+
+        # Invoice data
         fa = root.find('.//Fa')
         if fa is not None:
             data['invoice_number'] = fa.findtext('P_2', '')
             data['invoice_date'] = fa.findtext('P_1', '')
+            data['issue_place'] = fa.findtext('P_1M', '')
             data['currency'] = fa.findtext('KodWaluty', 'PLN')
+            data['invoice_type'] = fa.findtext('RodzajFaktury', 'VAT')
 
             # Period
             okres = fa.find('OkresFa')
@@ -193,32 +332,32 @@ class InvoicePDFGenerator:
                 ('P_13_7', None, None),
                 ('P_13_8', None, None),
             ]
-            # Fixed labels for fields without calculable rate
-            fixed_labels = {
-                'P_13_6_1': '0%', 'P_13_6_2': '0% (WDT)', 'P_13_6_3': '0% (eksport)',
-                'P_13_7': 'zw', 'P_13_8': 'np',
-            }
             rates = []
             for net_field, vat_field, vat_conv_field in vat_rate_fields:
                 net = self._parse_amount(fa.findtext(net_field, ''))
                 vat = self._parse_amount(fa.findtext(vat_field, '')) if vat_field else 0.0
                 vat_conv = self._parse_amount(fa.findtext(vat_conv_field, '')) if vat_conv_field else 0.0
                 if net:
-                    if net_field in fixed_labels:
-                        label = fixed_labels[net_field]
-                    elif net and vat:
-                        pct = round(vat / net * 100)
-                        label = f'{pct}%'
-                    else:
-                        label = '0%'
-                    rates.append({'label': label, 'net': net, 'vat': vat, 'vat_converted': vat_conv})
+                    label = VAT_RATE_LABELS.get(net_field, '0%')
+                    gross = net + vat
+                    rates.append({
+                        'label': label,
+                        'net': net,
+                        'vat': vat,
+                        'gross': gross,
+                        'vat_converted': vat_conv,
+                    })
             data['summary'] = {
                 'rates': rates,
                 'gross': self._parse_amount(fa.findtext('P_15', '0')),
             }
 
             # Items
+            exchange_rate_common = None
             for wiersz in fa.findall('FaWiersz'):
+                item_rate = wiersz.findtext('KursWaluty', '')
+                if item_rate:
+                    exchange_rate_common = self._parse_amount(item_rate)
                 item = {
                     'lp': wiersz.findtext('NrWierszaFa', ''),
                     'name': wiersz.findtext('P_7', ''),
@@ -230,8 +369,13 @@ class InvoicePDFGenerator:
                     'gross_value': self._parse_amount(wiersz.findtext('P_11A', '')),
                     'vat_rate': wiersz.findtext('P_12', ''),
                     'vat_value': self._parse_amount(wiersz.findtext('P_11Vat', '')),
+                    'gtu': wiersz.findtext('GTU', ''),
+                    'exchange_rate': self._parse_amount(item_rate) if item_rate else None,
                 }
                 data['items'].append(item)
+
+            if exchange_rate_common:
+                data['exchange_rate'] = exchange_rate_common
 
             # Determine pricing type (net vs gross)
             has_net_prices = any(item['unit_price_net'] for item in data['items'])
@@ -243,6 +387,14 @@ class InvoicePDFGenerator:
                 wartosc = opis.findtext('Wartosc', '')
                 if klucz or wartosc:
                     data['additional_descriptions'].append({'key': klucz, 'value': wartosc})
+
+            # Annotations (Adnotacje)
+            adnotacje = fa.find('Adnotacje')
+            if adnotacje is not None:
+                for field, (label, _) in ANNOTATION_LABELS.items():
+                    val = adnotacje.findtext(field, '')
+                    if val == '1':
+                        data['annotations'].append(label)
 
             # Payment info
             platnosc = fa.find('Platnosc')
@@ -268,12 +420,15 @@ class InvoicePDFGenerator:
         if podmiot1 is not None:
             dane = podmiot1.find('DaneIdentyfikacyjne')
             adres = podmiot1.find('Adres')
+            kontakt = podmiot1.find('DaneKontaktowe')
             data['seller'] = {
                 'nip': dane.findtext('NIP', '') if dane is not None else '',
                 'name': dane.findtext('Nazwa', '') if dane is not None else '',
                 'address1': adres.findtext('AdresL1', '') if adres is not None else '',
                 'address2': adres.findtext('AdresL2', '') if adres is not None else '',
-                'country': adres.findtext('KodKraju', 'PL') if adres is not None else 'PL',
+                'country_code': adres.findtext('KodKraju', 'PL') if adres is not None else 'PL',
+                'email': kontakt.findtext('Email', '') if kontakt is not None else '',
+                'phone': kontakt.findtext('Telefon', '') if kontakt is not None else '',
             }
 
         # Buyer (Podmiot2)
@@ -281,28 +436,35 @@ class InvoicePDFGenerator:
         if podmiot2 is not None:
             dane = podmiot2.find('DaneIdentyfikacyjne')
             adres = podmiot2.find('Adres')
+            kontakt = podmiot2.find('DaneKontaktowe')
+            brak_id = dane.findtext('BrakID', '') if dane is not None else ''
             data['buyer'] = {
                 'nip': dane.findtext('NIP', '') if dane is not None else '',
+                'brak_id': brak_id == '1',
                 'name': dane.findtext('Nazwa', '') if dane is not None else '',
                 'address1': adres.findtext('AdresL1', '') if adres is not None else '',
                 'address2': adres.findtext('AdresL2', '') if adres is not None else '',
-                'country': adres.findtext('KodKraju', 'PL') if adres is not None else 'PL',
+                'country_code': adres.findtext('KodKraju', 'PL') if adres is not None else 'PL',
+                'email': kontakt.findtext('Email', '') if kontakt is not None else '',
+                'phone': kontakt.findtext('Telefon', '') if kontakt is not None else '',
+                'jst': podmiot2.findtext('JST', ''),
+                'gv': podmiot2.findtext('GV', ''),
             }
 
-        # Footer
+        # Footer (Stopka)
         stopka = root.find('.//Stopka')
         if stopka is not None:
             for info in stopka.findall('.//StopkaFaktury'):
                 if info.text:
-                    data['footer'].append(info.text.strip())
+                    data['footer_texts'].append(info.text.strip())
             rejestry = stopka.find('Rejestry')
             if rejestry is not None:
-                krs = rejestry.findtext('KRS', '')
-                regon = rejestry.findtext('REGON', '')
-                if krs:
-                    data['footer'].append(f'KRS: {krs}')
-                if regon:
-                    data['footer'].append(f'REGON: {regon}')
+                data['registry'] = {
+                    'full_name': rejestry.findtext('PelnaNazwa', ''),
+                    'krs': rejestry.findtext('KRS', ''),
+                    'regon': rejestry.findtext('REGON', ''),
+                    'bdo': rejestry.findtext('BDO', ''),
+                }
 
         return data
 
@@ -315,9 +477,38 @@ class InvoicePDFGenerator:
         except ValueError:
             return 0.0
 
-    def _format_amount(self, amount: float, currency: str = 'PLN') -> str:
-        """Format amount for display."""
-        return f"{amount:,.2f} {currency}".replace(',', ' ').replace('.', ',').replace(' ', ' ')
+    def _format_amount(self, amount: float) -> str:
+        """Format amount for display (Polish locale: comma as decimal separator)."""
+        return f"{amount:,.2f}".replace(',', ' ').replace('.', ',').replace('\u00a0', ' ')
+
+    def _format_date_pl(self, date_str: str) -> str:
+        """Format YYYY-MM-DD date to DD.MM.YYYY."""
+        try:
+            dt = datetime.datetime.strptime(date_str, '%Y-%m-%d')
+            return dt.strftime('%d.%m.%Y')
+        except (ValueError, TypeError):
+            return date_str
+
+    def _country_name(self, code: str) -> str:
+        """Get Polish country name from ISO code."""
+        return COUNTRY_NAMES_PL.get(code, code)
+
+    def _invoice_type_label(self, type_code: str) -> str:
+        """Get Polish label for invoice type."""
+        labels = {
+            'VAT': 'Faktura podstawowa',
+            'KOR': 'Faktura koryguj\u0105ca',
+            'ZAL': 'Faktura zaliczkowa',
+            'ROZ': 'Faktura rozliczeniowa',
+            'UPR': 'Faktura uproszczona',
+            'KOR_ZAL': 'Korekta faktury zaliczkowej',
+            'KOR_ROZ': 'Korekta faktury rozliczeniowej',
+        }
+        return labels.get(type_code, f'Faktura {type_code}')
+
+    def _jst_gv_label(self, value: str) -> str:
+        """Map JST/GV values: 1=TAK, 2=NIE."""
+        return 'TAK' if value == '1' else 'NIE'
 
     def _generate_qr_image(self, xml_raw: bytes, seller_nip: str,
                            invoice_date: str, environment: str = 'prod') -> io.BytesIO:
@@ -326,21 +517,10 @@ class InvoicePDFGenerator:
 
         The QR encodes a verification URL per the KSeF specification:
         {base_url}/invoice/{seller_nip}/{DD-MM-YYYY}/{SHA256_base64url}
-
-        Args:
-            xml_raw: Original invoice XML as raw bytes (used for SHA-256 hash)
-            seller_nip: Seller's NIP number
-            invoice_date: Invoice date in YYYY-MM-DD format (from P_1)
-            environment: KSeF environment ('test', 'demo', 'prod')
-
-        Returns:
-            BytesIO buffer containing QR code PNG image
         """
-        # SHA-256 hash of original XML bytes, Base64URL encoded
         sha256_hash = hashlib.sha256(xml_raw).digest()
         hash_b64url = base64.urlsafe_b64encode(sha256_hash).rstrip(b'=').decode('ascii')
 
-        # Convert date from YYYY-MM-DD to DD-MM-YYYY
         try:
             dt = datetime.datetime.strptime(invoice_date, '%Y-%m-%d')
             date_formatted = dt.strftime('%d-%m-%Y')
@@ -364,6 +544,64 @@ class InvoicePDFGenerator:
         img.save(buf, format='PNG')
         buf.seek(0)
         return buf
+
+    def _build_party_cell(self, party: dict, header: str, is_buyer: bool = False) -> list:
+        """Build a list of Paragraphs for a seller/buyer cell."""
+        elements = []
+        elements.append(Paragraph(f"<b>{header}</b>", self.styles['SectionHeader']))
+
+        # ID line
+        if is_buyer and party.get('brak_id'):
+            elements.append(Paragraph("Brak identyfikatora", self.styles['CompanyDetails']))
+        elif party.get('nip'):
+            elements.append(Paragraph(f"NIP: {party['nip']}", self.styles['CompanyDetails']))
+
+        # Name
+        if party.get('name'):
+            elements.append(Paragraph(f"Nazwa: {party['name']}", self.styles['CompanyDetails']))
+
+        # Address
+        elements.append(Spacer(1, 2 * mm))
+        elements.append(Paragraph("<b>Adres</b>", self.styles['SubSectionHeader']))
+        if party.get('address1'):
+            elements.append(Paragraph(party['address1'], self.styles['CompanyDetails']))
+        if party.get('address2'):
+            elements.append(Paragraph(party['address2'], self.styles['CompanyDetails']))
+        country_code = party.get('country_code', 'PL')
+        elements.append(Paragraph(self._country_name(country_code), self.styles['CompanyDetails']))
+
+        # Contact data
+        if party.get('email') or party.get('phone'):
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph("<b>Dane kontaktowe</b>", self.styles['SubSectionHeader']))
+            if party.get('email'):
+                elements.append(Paragraph(f"E-mail: {party['email']}", self.styles['CompanyDetails']))
+            if party.get('phone'):
+                elements.append(Paragraph(f"Tel.: {party['phone']}", self.styles['CompanyDetails']))
+
+        # JST / GV for buyer
+        if is_buyer:
+            if party.get('jst'):
+                elements.append(Spacer(1, 2 * mm))
+                elements.append(Paragraph(
+                    f"Faktura dotyczy jednostki podrz\u0119dnej JST: {self._jst_gv_label(party['jst'])}",
+                    self.styles['CompanyDetails']))
+            if party.get('gv'):
+                elements.append(Paragraph(
+                    f"Faktura dotyczy cz\u0142onka grupy GV: {self._jst_gv_label(party['gv'])}",
+                    self.styles['CompanyDetails']))
+
+        return elements
+
+    def _add_horizontal_line(self, elements):
+        """Add a thin horizontal line separator."""
+        line_table = Table([['']], colWidths=[180 * mm])
+        line_table.setStyle(TableStyle([
+            ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.HexColor('#CC0000')),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(line_table)
 
     def generate_pdf(self, xml_content: str, output_path: str,
                      environment: str = 'prod', ksef_number: str = None,
@@ -389,80 +627,133 @@ class InvoicePDFGenerator:
         doc = SimpleDocTemplate(
             output_path,
             pagesize=A4,
-            rightMargin=15*mm,
-            leftMargin=15*mm,
-            topMargin=15*mm,
-            bottomMargin=15*mm
+            rightMargin=15 * mm,
+            leftMargin=15 * mm,
+            topMargin=15 * mm,
+            bottomMargin=15 * mm
         )
 
         elements = []
 
-        # Title
-        title = Paragraph(f"FAKTURA VAT nr {data['invoice_number']}", self.styles['InvoiceTitle'])
-        elements.append(title)
+        # === HEADER ===
+        # "Krajowy System e-Faktur" on left, invoice number info on right
+        header_left = []
+        header_left.append(Paragraph("<b>Krajowy System e-Faktur</b>", self.styles['MainTitle']))
 
-        # KSeF number (if available)
+        header_right = []
+        header_right.append(Paragraph("Numer Faktury:", self.styles['InvoiceSubtitle']))
+        header_right.append(Paragraph(
+            f"<b>{data['invoice_number']}</b>", self.styles['InvoiceTitle']))
+        header_right.append(Paragraph(
+            self._invoice_type_label(data.get('invoice_type', 'VAT')),
+            self.styles['InvoiceSubtitle']))
         if ksef_number:
-            elements.append(Paragraph(f"Numer KSeF: {ksef_number}", self.styles['Normal']))
+            header_right.append(Paragraph(
+                f"Numer KSEF: {ksef_number}", self.styles['InvoiceSubtitle']))
 
-        # Invoice date and period
-        date_text = f"Data wystawienia: {data['invoice_date']}"
-        if data.get('period_from') and data.get('period_to'):
-            date_text += f"<br/>Okres rozliczeniowy: {data['period_from']} - {data['period_to']}"
-        elements.append(Paragraph(date_text, self.styles['Normal']))
-        elements.append(Spacer(1, 10*mm))
+        header_table = Table(
+            [[header_left, header_right]],
+            colWidths=[90 * mm, 90 * mm])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(header_table)
+        elements.append(Spacer(1, 6 * mm))
 
-        # Seller and Buyer side by side
+        # === SELLER / BUYER ===
         seller = data.get('seller', {})
         buyer = data.get('buyer', {})
 
-        parties_data = [
-            [
-                Paragraph("<b>SPRZEDAWCA</b>", self.styles['SectionHeader']),
-                Paragraph("<b>NABYWCA</b>", self.styles['SectionHeader'])
-            ],
-            [
-                Paragraph(f"<b>{seller.get('name', '')}</b>", self.styles['CompanyName']),
-                Paragraph(f"<b>{buyer.get('name', '')}</b>", self.styles['CompanyName'])
-            ],
-            [
-                Paragraph(f"NIP: {seller.get('nip', '')}", self.styles['CompanyDetails']),
-                Paragraph(f"NIP: {buyer.get('nip', '')}", self.styles['CompanyDetails'])
-            ],
-            [
-                Paragraph(seller.get('address1', ''), self.styles['CompanyDetails']),
-                Paragraph(buyer.get('address1', ''), self.styles['CompanyDetails'])
-            ],
-            [
-                Paragraph(seller.get('address2', ''), self.styles['CompanyDetails']),
-                Paragraph(buyer.get('address2', ''), self.styles['CompanyDetails'])
-            ],
-        ]
+        seller_cell = self._build_party_cell(seller, 'Sprzedawca', is_buyer=False)
+        buyer_cell = self._build_party_cell(buyer, 'Nabywca', is_buyer=True)
 
-        parties_table = Table(parties_data, colWidths=[90*mm, 90*mm])
+        parties_table = Table(
+            [[seller_cell, buyer_cell]],
+            colWidths=[90 * mm, 90 * mm])
         parties_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
         ]))
         elements.append(parties_table)
-        elements.append(Spacer(1, 8*mm))
+        elements.append(Spacer(1, 6 * mm))
 
-        # Items table
-        elements.append(Paragraph("<b>POZYCJE FAKTURY</b>", self.styles['SectionHeader']))
+        # === SZCZEG\u00d3\u0141Y ===
+        self._add_horizontal_line(elements)
+        elements.append(Paragraph("<b>Szczeg\u00f3\u0142y</b>", self.styles['SectionHeader']))
 
-        # Table header - adjust labels based on pricing type
+        details_left = []
+        details_right = []
+
+        date_display = self._format_date_pl(data['invoice_date'])
+        details_left.append(Paragraph(
+            f"Data wystawienia, z zastrze\u017ceniem art. 106na ust. 1 ustawy: {date_display}",
+            self.styles['CompanyDetails']))
+        details_left.append(Paragraph(
+            f"Kod waluty: {currency}", self.styles['CompanyDetails']))
+
+        if data.get('exchange_rate'):
+            rate_str = f"{data['exchange_rate']:.6f}".replace('.', ',')
+            details_left.append(Paragraph(
+                f"Kurs waluty: {rate_str}",
+                self.styles['CompanyDetails']))
+
+        if data.get('issue_place'):
+            details_right.append(Paragraph(
+                f"Miejsce wystawienia: {data['issue_place']}",
+                self.styles['CompanyDetails']))
+
+        if data.get('exchange_rate'):
+            details_right.append(Paragraph(
+                "Kurs waluty wsp\u00f3lny dla wszystkich wierszy faktury",
+                self.styles['CompanyDetails']))
+
+        if data.get('period_from') and data.get('period_to'):
+            details_left.append(Paragraph(
+                f"Okres: {self._format_date_pl(data['period_from'])} - {self._format_date_pl(data['period_to'])}",
+                self.styles['CompanyDetails']))
+
+        details_table = Table(
+            [[details_left, details_right]],
+            colWidths=[100 * mm, 80 * mm])
+        details_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(details_table)
+        elements.append(Spacer(1, 6 * mm))
+
+        # === POZYCJE ===
+        self._add_horizontal_line(elements)
+        elements.append(Paragraph("<b>Pozycje</b>", self.styles['SectionHeader']))
+
+        if currency != 'PLN':
+            elements.append(Paragraph(
+                f"Faktura wystawiona w walucie {currency}",
+                self.styles['CompanyDetails']))
+            elements.append(Spacer(1, 2 * mm))
+
+        # Determine pricing type
         pricing_type = data.get('pricing_type', 'net')
         if pricing_type == 'net':
-            price_label = 'Cena netto'
-            value_label = 'Wartość netto'
+            price_label = 'Cena jedn. netto'
+            value_label = 'Warto\u015b\u0107 sprzeda\u017cy netto'
         else:
-            price_label = 'Cena brutto'
-            value_label = 'Wartość brutto'
+            price_label = 'Cena jedn. brutto'
+            value_label = 'Warto\u015b\u0107 sprzeda\u017cy brutto'
 
-        items_header = ['Lp.', 'Nazwa towaru/usługi', 'J.m.', 'Ilość', price_label, value_label, 'VAT']
-        items_data = [items_header]
+        # Check if any items have GTU
+        has_gtu = any(item.get('gtu') for item in data.get('items', []))
+
+        items_header = ['Lp.', 'Nazwa towaru lub us\u0142ugi', price_label, 'Ilo\u015b\u0107',
+                        'Miara', 'Stawka podatku', value_label]
+        if has_gtu:
+            items_header.append('GTU')
+
+        items_data = [[Paragraph(f"<b>{h}</b>", self.styles['TableCell']) for h in items_header]]
 
         for item in data.get('items', []):
             if pricing_type == 'net':
@@ -473,113 +764,185 @@ class InvoicePDFGenerator:
                 value = item.get('gross_value') or item.get('net_value', 0)
 
             vat_rate = item.get('vat_rate', '')
-            if vat_rate and vat_rate not in ('zw', 'np', 'oo'):
-                vat_display = f"{vat_rate}%"
-            else:
-                vat_display = vat_rate
+            # Map vat_rate display: keep as-is for named rates, append % for numeric
+            vat_display = vat_rate
 
             row = [
-                item['lp'],
-                Paragraph(item['name'], self.styles['Normal']),
-                item['unit'],
-                f"{item['qty']:.2f}".replace('.', ','),
-                self._format_amount(unit_price, ''),
-                self._format_amount(value, ''),
-                vat_display,
+                Paragraph(str(item['lp']), self.styles['TableCell']),
+                Paragraph(item['name'], self.styles['TableCell']),
+                Paragraph(self._format_amount(unit_price), self.styles['TableCellRight']),
+                Paragraph(str(int(item['qty'])) if item['qty'] == int(item['qty']) else f"{item['qty']:.2f}".replace('.', ','),
+                          self.styles['TableCellRight']),
+                Paragraph(item.get('unit', ''), self.styles['TableCell']),
+                Paragraph(vat_display, self.styles['TableCell']),
+                Paragraph(self._format_amount(value), self.styles['TableCellRight']),
             ]
+            if has_gtu:
+                row.append(Paragraph(item.get('gtu', ''), self.styles['TableCell']))
             items_data.append(row)
 
-        col_widths = [10*mm, 70*mm, 15*mm, 15*mm, 25*mm, 25*mm, 15*mm]
+        if has_gtu:
+            col_widths = [10 * mm, 50 * mm, 22 * mm, 12 * mm, 16 * mm, 22 * mm, 28 * mm, 18 * mm]
+        else:
+            col_widths = [10 * mm, 58 * mm, 25 * mm, 14 * mm, 16 * mm, 25 * mm, 30 * mm]
+
         items_table = Table(items_data, colWidths=col_widths)
         items_table.setStyle(TableStyle([
             # Header
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4472C4')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F0F0')),
             ('FONTNAME', (0, 0), (-1, -1), self.font_name),
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # Lp
-            ('ALIGN', (2, 1), (2, -1), 'CENTER'),  # J.m.
-            ('ALIGN', (3, 1), (-1, -1), 'RIGHT'),  # Numbers
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F2F2F2')]),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        elements.append(items_table)
-        elements.append(Spacer(1, 8*mm))
-
-        # Summary
-        elements.append(Paragraph("<b>PODSUMOWANIE</b>", self.styles['SectionHeader']))
-
-        summary = data.get('summary', {})
-        summary_data = []
-
-        for rate in summary.get('rates', []):
-            summary_data.append([
-                f"Wartość netto ({rate['label']}):",
-                self._format_amount(rate['net'], currency)
-            ])
-            if rate.get('vat'):
-                summary_data.append([
-                    f"VAT ({rate['label']}):",
-                    self._format_amount(rate['vat'], currency)
-                ])
-            if rate.get('vat_converted'):
-                summary_data.append([
-                    f"VAT ({rate['label']}) w PLN:",
-                    self._format_amount(rate['vat_converted'], 'PLN')
-                ])
-
-        summary_data.append(['', ''])
-        summary_data.append([
-            '<b>RAZEM DO ZAPŁATY:</b>',
-            f"<b>{self._format_amount(summary.get('gross', 0), currency)}</b>"
-        ])
-
-        summary_table_data = [[Paragraph(str(row[0]), self.styles['Normal']),
-                               Paragraph(str(row[1]), self.styles['Normal'])] for row in summary_data]
-
-        summary_table = Table(summary_table_data, colWidths=[120*mm, 55*mm])
-        summary_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('TOPPADDING', (0, 0), (-1, -1), 3),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]))
-        elements.append(summary_table)
+        elements.append(items_table)
 
-        # Payment info
+        # Total line
+        summary = data.get('summary', {})
+        elements.append(Paragraph(
+            f"<b>Kwota nale\u017cno\u015bci og\u00f3\u0142em: {self._format_amount(summary.get('gross', 0))} {currency}</b>",
+            self.styles['TotalRight']))
+        elements.append(Spacer(1, 6 * mm))
+
+        # === PODSUMOWANIE STAWEK PODATKU ===
+        self._add_horizontal_line(elements)
+        elements.append(Paragraph("<b>Podsumowanie stawek podatku</b>", self.styles['SectionHeader']))
+
+        tax_header = ['Lp.', 'Stawka podatku', 'Kwota netto', 'Kwota podatku', 'Kwota brutto']
+        tax_data = [[Paragraph(f"<b>{h}</b>", self.styles['TableCell']) for h in tax_header]]
+
+        for idx, rate in enumerate(summary.get('rates', []), 1):
+            tax_data.append([
+                Paragraph(str(idx), self.styles['TableCell']),
+                Paragraph(rate['label'], self.styles['TableCell']),
+                Paragraph(self._format_amount(rate['net']), self.styles['TableCellRight']),
+                Paragraph(self._format_amount(rate['vat']), self.styles['TableCellRight']),
+                Paragraph(self._format_amount(rate['gross']), self.styles['TableCellRight']),
+            ])
+
+        tax_col_widths = [10 * mm, 60 * mm, 35 * mm, 35 * mm, 35 * mm]
+        tax_table = Table(tax_data, colWidths=tax_col_widths)
+        tax_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F0F0')),
+            ('FONTNAME', (0, 0), (-1, -1), self.font_name),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(tax_table)
+        elements.append(Spacer(1, 6 * mm))
+
+        # === ADNOTACJE ===
+        annotations = data.get('annotations', [])
+        if annotations:
+            self._add_horizontal_line(elements)
+            elements.append(Paragraph("<b>Adnotacje</b>", self.styles['SectionHeader']))
+            for ann in annotations:
+                elements.append(Paragraph(ann, self.styles['Normal']))
+            elements.append(Spacer(1, 4 * mm))
+
+        # === P\u0141ATNO\u015a\u0106 ===
         payment = data.get('payment', {})
         if any(payment.values()):
-            elements.append(Spacer(1, 5*mm))
-            elements.append(Paragraph("<b>PLATNOŚĆ</b>", self.styles['SectionHeader']))
+            self._add_horizontal_line(elements)
+            elements.append(Paragraph("<b>P\u0142atno\u015b\u0107</b>", self.styles['SectionHeader']))
 
-            payment_form_names = {
-                '1': 'gotówka', '2': 'karta', '3': 'bon', '4': 'czek',
-                '5': 'kredyt', '6': 'przelew', '7': 'mobilna',
-            }
+            payment_info_parts = []
+            if payment.get('description'):
+                payment_info_parts.append(f"Informacja o p\u0142atno\u015bci: {payment['description']}")
+            else:
+                payment_info_parts.append("Informacja o p\u0142atno\u015bci: Brak zap\u0142aty")
+
             if payment.get('form'):
-                form_display = payment_form_names.get(payment['form'], payment['form'])
-                elements.append(Paragraph(f"Forma płatności: {form_display}", self.styles['Normal']))
-            if payment.get('due_dates'):
-                for date in payment['due_dates']:
-                    elements.append(Paragraph(f"Termin płatności: {date}", self.styles['Normal']))
+                form_display = PAYMENT_FORM_NAMES.get(payment['form'], payment['form'])
+                payment_info_parts.append(f"Forma p\u0142atno\u015bci: {form_display}")
+
+            for part in payment_info_parts:
+                elements.append(Paragraph(part, self.styles['Normal']))
+
             if payment.get('bank_account'):
                 line = f"Nr rachunku: {payment['bank_account']}"
                 if payment.get('bank_name'):
                     line += f" ({payment['bank_name']})"
                 elements.append(Paragraph(line, self.styles['Normal']))
-            if payment.get('description'):
-                elements.append(Paragraph(f"{payment['description']}", self.styles['Normal']))
 
-        # Additional descriptions (DodatkowyOpis)
+            # Due dates as a small table
+            if payment.get('due_dates'):
+                elements.append(Spacer(1, 2 * mm))
+                due_header = [Paragraph("<b>Termin p\u0142atno\u015bci</b>", self.styles['TableCell'])]
+                due_data = [due_header]
+                for date in payment['due_dates']:
+                    due_data.append([Paragraph(self._format_date_pl(date), self.styles['TableCell'])])
+                due_table = Table(due_data, colWidths=[50 * mm])
+                due_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F0F0')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ]))
+                # Right-align the due dates table
+                wrapper = Table([[None, due_table]], colWidths=[100 * mm, 55 * mm])
+                wrapper.setStyle(TableStyle([
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ]))
+                elements.append(wrapper)
+
+            elements.append(Spacer(1, 4 * mm))
+
+        # === REJESTRY ===
+        registry = data.get('registry', {})
+        if any(registry.values()):
+            self._add_horizontal_line(elements)
+            elements.append(Paragraph("<b>Rejestry</b>", self.styles['SectionHeader']))
+
+            reg_headers = []
+            reg_values = []
+            if registry.get('full_name'):
+                reg_headers.append(Paragraph("<b>Pe\u0142na nazwa</b>", self.styles['TableCell']))
+                reg_values.append(Paragraph(registry['full_name'], self.styles['TableCell']))
+            if registry.get('regon'):
+                reg_headers.append(Paragraph("<b>REGON</b>", self.styles['TableCell']))
+                reg_values.append(Paragraph(registry['regon'], self.styles['TableCell']))
+            if registry.get('krs'):
+                reg_headers.append(Paragraph("<b>KRS</b>", self.styles['TableCell']))
+                reg_values.append(Paragraph(registry['krs'], self.styles['TableCell']))
+            if registry.get('bdo'):
+                reg_headers.append(Paragraph("<b>BDO</b>", self.styles['TableCell']))
+                reg_values.append(Paragraph(registry['bdo'], self.styles['TableCell']))
+
+            if reg_headers:
+                n_cols = len(reg_headers)
+                reg_col_width = 180 * mm / n_cols
+                reg_table = Table([reg_headers, reg_values], colWidths=[reg_col_width] * n_cols)
+                reg_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F0F0')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ]))
+                elements.append(reg_table)
+            elements.append(Spacer(1, 4 * mm))
+
+        # === DODATKOWE OPISY ===
         additional_descs = data.get('additional_descriptions', [])
         if additional_descs:
-            elements.append(Spacer(1, 5*mm))
-            elements.append(Paragraph("<b>INFORMACJE DODATKOWE</b>", self.styles['SectionHeader']))
+            self._add_horizontal_line(elements)
+            elements.append(Paragraph("<b>Informacje dodatkowe</b>", self.styles['SectionHeader']))
             for desc in additional_descs:
                 key = desc.get('key', '')
                 value = desc.get('value', '')
@@ -587,16 +950,33 @@ class InvoicePDFGenerator:
                     elements.append(Paragraph(f"<b>{key}:</b> {value}", self.styles['Normal']))
                 elif value:
                     elements.append(Paragraph(value, self.styles['Normal']))
+            elements.append(Spacer(1, 4 * mm))
 
-        # Footer
-        if data.get('footer'):
-            elements.append(Spacer(1, 10*mm))
-            elements.append(Paragraph("<b>Informacje dodatkowe:</b>", self.styles['Footer']))
-            for line in data['footer']:
-                elements.append(Paragraph(line, self.styles['Footer']))
+        # === POZOSTA\u0141E INFORMACJE (Stopka) ===
+        if data.get('footer_texts'):
+            self._add_horizontal_line(elements)
+            elements.append(Paragraph("<b>Pozosta\u0142e informacje</b>", self.styles['SectionHeader']))
 
-        # KSeF QR code and note
-        elements.append(Spacer(1, 5*mm))
+            footer_header = [Paragraph("<b>Stopka faktury</b>", self.styles['TableCell'])]
+            footer_data = [footer_header]
+            for text in data['footer_texts']:
+                # Replace \r\n with <br/> for proper rendering
+                text_html = text.replace('\r\n', '<br/>').replace('\n', '<br/>').replace('\r', '<br/>')
+                footer_data.append([Paragraph(text_html, self.styles['TableCell'])])
+            footer_table = Table(footer_data, colWidths=[180 * mm])
+            footer_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F0F0')),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ]))
+            elements.append(footer_table)
+            elements.append(Spacer(1, 6 * mm))
+
+        # === QR CODE ===
+        self._add_horizontal_line(elements)
+        elements.append(Spacer(1, 4 * mm))
 
         seller_nip = data.get('seller', {}).get('nip', '')
         invoice_date = data.get('invoice_date', '')
@@ -604,45 +984,48 @@ class InvoicePDFGenerator:
             try:
                 qr_raw = xml_raw_bytes if xml_raw_bytes is not None else xml_content.encode('utf-8')
                 qr_buf = self._generate_qr_image(qr_raw, seller_nip, invoice_date, environment)
-                qr_img = Image(qr_buf, width=30*mm, height=30*mm)
+                qr_img = Image(qr_buf, width=35 * mm, height=35 * mm)
+
+                elements.append(Paragraph(
+                    "<b>Sprawdz\u0301, czy Twoja faktura znajduje sie\u0328 w KSeF!</b>",
+                    self.styles['SectionHeader']))
+                elements.append(Spacer(1, 2 * mm))
+
+                qr_right = []
+                qr_right.append(Paragraph(
+                    "Nie mo\u017cesz zeskanowa\u0107 kodu z obrazka? Kliknij w link weryfikacyjny i przejd\u017a do weryfikacji faktury!",
+                    self.styles['CompanyDetails']))
 
                 ksef_label = ksef_number if ksef_number else ''
-                qr_table_data = [[
-                    qr_img,
-                    [
-                        Paragraph(
-                            "Faktura wygenerowana z Krajowego Systemu e-Faktur (KSeF)",
-                            self.styles['Footer']
-                        ),
-                        Spacer(1, 2*mm),
-                        Paragraph(
-                            "Kod QR służy do weryfikacji faktury w systemie KSeF",
-                            self.styles['Footer']
-                        ),
-                    ] + ([
-                        Spacer(1, 2*mm),
-                        Paragraph(f"Numer KSeF: {ksef_label}", self.styles['Footer']),
-                    ] if ksef_label else []),
-                ]]
-                qr_table = Table(qr_table_data, colWidths=[35*mm, 140*mm])
+                if ksef_label:
+                    qr_right.append(Spacer(1, 4 * mm))
+                    qr_right.append(Paragraph(ksef_label, self.styles['CompanyDetails']))
+
+                qr_table_data = [[qr_img, qr_right]]
+                qr_table = Table(qr_table_data, colWidths=[40 * mm, 140 * mm])
                 qr_table.setStyle(TableStyle([
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                     ('LEFTPADDING', (0, 0), (0, 0), 0),
-                    ('LEFTPADDING', (1, 0), (1, 0), 5*mm),
+                    ('LEFTPADDING', (1, 0), (1, 0), 5 * mm),
                 ]))
                 elements.append(qr_table)
+
             except Exception as e:
-                logger.warning(f"Nie udało się wygenerować kodu QR: {e}")
+                logger.warning(f"Failed to generate QR code: {e}")
                 elements.append(Paragraph(
                     "Faktura wygenerowana z Krajowego Systemu e-Faktur (KSeF)",
-                    self.styles['Footer']
-                ))
+                    self.styles['Footer']))
         else:
             elements.append(Paragraph(
                 "Faktura wygenerowana z Krajowego Systemu e-Faktur (KSeF)",
-                self.styles['Footer']
-            ))
+                self.styles['Footer']))
+
+        # System info at the bottom
+        if data.get('system_info'):
+            elements.append(Spacer(1, 4 * mm))
+            elements.append(Paragraph(
+                f"Wytworzona w: {data['system_info']}", self.styles['Footer']))
 
         doc.build(elements)
-        logger.info(f"PDF generated: {output_path} ({len(data.get('items', []))} items, gross={data.get('summary', {}).get('gross', 0)})")
+        logger.info(f"PDF generated: {output_path} ({len(data.get('items', []))} items, gross={summary.get('gross', 0)})")
         return output_path
