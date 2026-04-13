@@ -286,8 +286,13 @@ class InvoicePDFGenerator:
 
         Escapes HTML entities and converts bare <br> to <br/>.
         """
+        # Convert newlines and bare <br> tags to a placeholder before escaping
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace('<br/>', '\n').replace('<br>', '\n')
         text = html.escape(text)
-        # Convert common bare HTML tags that might appear in invoice data
+        # Restore line breaks as self-closing <br/>
+        text = text.replace('\n', '<br/>')
+        # Handle any that were double-escaped in the source
         text = text.replace('&lt;br&gt;', '<br/>')
         text = text.replace('&lt;br/&gt;', '<br/>')
         return text
