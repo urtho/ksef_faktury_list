@@ -6,6 +6,7 @@ services:
       - ./certs:/certs:ro
       - ./output:/output
       - ./meta:/app/meta
+      - ./state.json:/app/state.json
     command:
       - -c
       - /app/config.json
