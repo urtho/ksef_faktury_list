@@ -9,6 +9,9 @@ import re
 import sys
 import tempfile
 import time
+from glob import glob
+
+from lxml import etree
 
 from .client import KSeFClient, KSeFError
 from .pdf import InvoicePDFGenerator
@@ -355,11 +358,27 @@ def main():
                     ksef_number = inv.get('ksefNumber')
                     if ksef_number:
                         try:
-                            xml_raw = get_xml_cached(ksef_number)
                             xml_dir = expand_date_template(xml_output_dir, inv.get('issueDate'))
+                            safe_prefix = ksef_number.replace('/', '_').replace('\\', '_')
+
+                            # Check if a valid XML already exists on disk for this ksef_number
+                            existing = glob(os.path.join(xml_dir, f"{safe_prefix}*.xml"))
+                            if existing:
+                                try:
+                                    with open(existing[0], 'rb') as f:
+                                        cached_raw = f.read()
+                                    etree.fromstring(cached_raw)
+                                    # Valid XML on disk — load into cache and skip download
+                                    xml_cache[ksef_number] = cached_raw
+                                    logger.info("Skipped (exists): %s", existing[0])
+                                    continue
+                                except (etree.XMLSyntaxError, OSError):
+                                    logger.warning("Existing file invalid, re-downloading: %s", existing[0])
+
+                            xml_raw = get_xml_cached(ksef_number)
                             os.makedirs(xml_dir, exist_ok=True)
-                            safe_name = ksef_number.replace('/', '_').replace('\\', '_')
                             seller_name, buyer_name, inv_number = extract_invoice_parties(xml_raw)
+                            safe_name = safe_prefix
                             if subject_type == 'Subject2':
                                 safe_name += '_' + sanitize_for_filename(inv_number) + '_' + sanitize_for_filename(seller_name)
                             elif subject_type == 'Subject1':
