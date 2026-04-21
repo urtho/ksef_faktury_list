@@ -904,12 +904,12 @@ class KSeFClient:
         if date_to is None:
             date_to = datetime.date.today()
         if date_from is None:
-            date_from = date_to - datetime.timedelta(days=90)
+            date_from = date_to - datetime.timedelta(days=89)
 
-        # KSeF limits date range to 90 days
-        max_range = datetime.timedelta(days=90)
+        # KSeF rejects ranges wider than 89 days
+        max_range = datetime.timedelta(days=89)
         if (date_to - date_from) > max_range:
-            logger.warning(f"Date range exceeds 90 days, limiting to {date_to - max_range} - {date_to}")
+            logger.warning(f"Date range exceeds 89 days, limiting to {date_to - max_range} - {date_to}")
             date_from = date_to - max_range
 
         data = {
