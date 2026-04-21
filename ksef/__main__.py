@@ -63,6 +63,10 @@ def main():
                         help='Re-render PDF from existing XML files (no download from KSeF)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Check what would be downloaded/generated/sent (no writes, no state.json update)')
+    parser.add_argument('--bootstrap', action='store_true',
+                        help='Allow starting with no/unreadable state.json (first run or recovery after corruption). '
+                             'Without this flag, a missing or unparseable state.json is a fatal error — prevents '
+                             'accidental full re-sync if the file is lost.')
     cli_args = parser.parse_args()
     config_path = cli_args.config
     args = load_config(config_path)
@@ -272,7 +276,9 @@ def main():
             logger.error("Private key file not found: %s", args.key)
             sys.exit(1)
 
-    # Load state for incremental sync (persisted under <config_dir>/meta/)
+    # Load state for incremental sync (persisted under <config_dir>/meta/).
+    # Missing or unparseable state.json is fatal unless --bootstrap is given,
+    # so an accidental delete can't silently trigger a full re-sync.
     state_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'meta', 'state.json')
     state = {}
     if os.path.exists(state_path):
@@ -280,10 +286,30 @@ def main():
             with open(state_path, 'r') as f:
                 state = json.load(f)
         except json.JSONDecodeError as e:
-            logger.warning("state.json exists but is not valid JSON (%s) — starting with empty state; "
-                           "incremental sync will restart from config.date_from", e)
+            if cli_args.bootstrap:
+                logger.warning("state.json exists but is not valid JSON (%s) — bootstrapping with empty state; "
+                               "existing file will be overwritten on first successful sync", e)
+            else:
+                logger.error("state.json at %s exists but is not valid JSON: %s", state_path, e)
+                logger.error("Refusing to start — pass --bootstrap to recover with an empty state "
+                             "(this will re-sync all invoices in the queried window).")
+                sys.exit(1)
         except OSError as e:
-            logger.warning("state.json exists but could not be read (%s) — starting with empty state", e)
+            if cli_args.bootstrap:
+                logger.warning("state.json exists but could not be read (%s) — bootstrapping with empty state", e)
+            else:
+                logger.error("state.json at %s could not be read: %s", state_path, e)
+                logger.error("Refusing to start — pass --bootstrap to proceed with an empty state.")
+                sys.exit(1)
+    else:
+        if cli_args.bootstrap:
+            logger.warning("state.json not found at %s — bootstrapping with empty state "
+                           "(full sync of the queried window will follow)", state_path)
+        else:
+            logger.error("state.json not found at %s", state_path)
+            logger.error("Refusing to start — pass --bootstrap for first run or recovery "
+                         "(this will sync everything in the queried window, which may be large).")
+            sys.exit(1)
 
     # Parse date_to once (shared across subject types)
     date_to = None
