@@ -904,7 +904,7 @@ class KSeFClient:
         if date_to is None:
             date_to = datetime.date.today()
         if date_from is None:
-            date_from = date_to - datetime.timedelta(days=30)
+            date_from = date_to - datetime.timedelta(days=90)
 
         # KSeF limits date range to 90 days
         max_range = datetime.timedelta(days=90)
