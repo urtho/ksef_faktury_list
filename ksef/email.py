@@ -32,9 +32,9 @@ def send_invoice_email(
         xml_content: Invoice XML content (bytes or str, optional)
         pdf_path: Path to invoice PDF file (optional)
     """
-    logger.info(f"Przygotowywanie emaila dla faktury {invoice_number} (KSeF: {ksef_number})")
-    logger.debug(f"  Od: {email_from}, Do: {', '.join(email_to)}")
-    logger.debug(f"  Temat: {subject}")
+    logger.info(f"Preparing email for invoice {invoice_number} (KSeF: {ksef_number})")
+    logger.debug(f"  From: {email_from}, To: {', '.join(email_to)}")
+    logger.debug(f"  Subject: {subject}")
 
     msg = MIMEMultipart()
     msg['From'] = email_from
@@ -52,28 +52,28 @@ def send_invoice_email(
         pdf_attachment = MIMEApplication(pdf_data, _subtype='pdf')
         pdf_attachment.add_header('Content-Disposition', 'attachment', filename=f"{safe_name}.pdf")
         msg.attach(pdf_attachment)
-        logger.info(f"  Dołączono PDF: {safe_name}.pdf ({len(pdf_data)} bajtów)")
+        logger.info(f"  Attached PDF: {safe_name}.pdf ({len(pdf_data)} bytes)")
     else:
-        logger.warning(f"  Brak załącznika PDF (ścieżka: {pdf_path})")
+        logger.warning(f"  PDF attachment missing (path: {pdf_path})")
 
     if xml_content:
         xml_bytes = xml_content if isinstance(xml_content, bytes) else xml_content.encode('utf-8')
         xml_attachment = MIMEApplication(xml_bytes, _subtype='xml')
         xml_attachment.add_header('Content-Disposition', 'attachment', filename=f"{safe_name}.xml")
         msg.attach(xml_attachment)
-        logger.info(f"  Dołączono XML: {safe_name}.xml ({len(xml_bytes)} bajtów)")
+        logger.info(f"  Attached XML: {safe_name}.xml ({len(xml_bytes)} bytes)")
     else:
-        logger.warning(f"  Brak załącznika XML")
+        logger.warning(f"  XML attachment missing")
 
-    logger.info(f"Łączenie z SMTP {smtp_host}:{smtp_port}...")
+    logger.info(f"Connecting to SMTP {smtp_host}:{smtp_port}...")
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.set_debuglevel(logger.isEnabledFor(logging.DEBUG))
         logger.debug("  STARTTLS...")
         server.starttls()
-        logger.debug(f"  Logowanie jako {smtp_user}...")
+        logger.debug(f"  Logging in as {smtp_user}...")
         server.login(smtp_user, smtp_password)
         server.sendmail(email_from, email_to, msg.as_string())
-        logger.info(f"Email wysłany pomyślnie dla {ksef_number}")
+        logger.info(f"Email sent successfully for {ksef_number}")
 
 
 def send_grouped_email(
@@ -94,9 +94,9 @@ def send_grouped_email(
         subject: Email subject
         invoices_data: List of dicts with keys: invoice_number, ksef_number, xml_content, pdf_path
     """
-    logger.info(f"Przygotowywanie zbiorczego emaila z {len(invoices_data)} fakturą/ami")
-    logger.debug(f"  Od: {email_from}, Do: {', '.join(email_to)}")
-    logger.debug(f"  Temat: {subject}")
+    logger.info(f"Preparing grouped email with {len(invoices_data)} invoice(s)")
+    logger.debug(f"  From: {email_from}, To: {', '.join(email_to)}")
+    logger.debug(f"  Subject: {subject}")
 
     msg = MIMEMultipart()
     msg['From'] = email_from
@@ -119,7 +119,7 @@ def send_grouped_email(
             pdf_attachment.add_header('Content-Disposition', 'attachment', filename=f"{safe_name}.pdf")
             msg.attach(pdf_attachment)
             attachment_count += 1
-            logger.info(f"  Dołączono PDF: {safe_name}.pdf ({len(pdf_data)} bajtów)")
+            logger.info(f"  Attached PDF: {safe_name}.pdf ({len(pdf_data)} bytes)")
 
         if inv.get('xml_content'):
             xml_data = inv['xml_content']
@@ -128,15 +128,15 @@ def send_grouped_email(
             xml_attachment.add_header('Content-Disposition', 'attachment', filename=f"{safe_name}.xml")
             msg.attach(xml_attachment)
             attachment_count += 1
-            logger.info(f"  Dołączono XML: {safe_name}.xml ({len(xml_bytes)} bajtów)")
+            logger.info(f"  Attached XML: {safe_name}.xml ({len(xml_bytes)} bytes)")
 
-    logger.info(f"Łączna liczba załączników: {attachment_count}")
-    logger.info(f"Łączenie z SMTP {smtp_host}:{smtp_port}...")
+    logger.info(f"Total attachments: {attachment_count}")
+    logger.info(f"Connecting to SMTP {smtp_host}:{smtp_port}...")
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.set_debuglevel(logger.isEnabledFor(logging.DEBUG))
         logger.debug("  STARTTLS...")
         server.starttls()
-        logger.debug(f"  Logowanie jako {smtp_user}...")
+        logger.debug(f"  Logging in as {smtp_user}...")
         server.login(smtp_user, smtp_password)
         server.sendmail(email_from, email_to, msg.as_string())
-        logger.info(f"Email zbiorczy wysłany pomyślnie ({len(invoices_data)} faktur, {attachment_count} załączników)")
+        logger.info(f"Grouped email sent successfully ({len(invoices_data)} invoices, {attachment_count} attachments)")

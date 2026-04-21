@@ -28,14 +28,40 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
+def _save_state(state, state_path, subject_type, max_date, extra_msg=''):
+    """Atomically persist state.json.
+
+    Writes to a sibling .tmp file and os.replace()s it into place so a crash
+    or permission error mid-write can't corrupt the existing state. Updates
+    the in-memory dict only on successful write. Returns True on success.
+    """
+    state.setdefault('last_sync_utc', {})[subject_type] = max_date
+    tmp_path = state_path + '.tmp'
+    try:
+        with open(tmp_path, 'w') as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, state_path)
+    except OSError as e:
+        logger.error("Failed to persist state.json for %s: %s — state unchanged on disk; continuing",
+                     subject_type, e)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        return False
+    logger.info("Saved max permanentStorageDate for %s: %s to %s%s",
+                subject_type, max_date, state_path, extra_msg)
+    return True
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Pobieranie faktur z KSeF')
+    parser = argparse.ArgumentParser(description='Fetch invoices from KSeF')
     parser.add_argument('-c', '--config', default='config.json',
-                        help='Ścieżka do pliku konfiguracji (domyślnie: config.json)')
+                        help='Path to config file (default: config.json)')
     parser.add_argument('--rerender', action='store_true',
-                        help='Ponowne generowanie PDF z istniejących plików XML (bez pobierania z KSeF)')
+                        help='Re-render PDF from existing XML files (no download from KSeF)')
     parser.add_argument('--dry-run', action='store_true',
-                        help='Tylko sprawdź co zostałoby pobrane/wygenerowane/wysłane (bez zapisów i aktualizacji state.json)')
+                        help='Check what would be downloaded/generated/sent (no writes, no state.json update)')
     cli_args = parser.parse_args()
     config_path = cli_args.config
     args = load_config(config_path)
@@ -252,8 +278,11 @@ def main():
         try:
             with open(state_path, 'r') as f:
                 state = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
+        except json.JSONDecodeError as e:
+            logger.warning("state.json exists but is not valid JSON (%s) — starting with empty state; "
+                           "incremental sync will restart from config.date_from", e)
+        except OSError as e:
+            logger.warning("state.json exists but could not be read (%s) — starting with empty state", e)
 
     # Parse date_to once (shared across subject types)
     date_to = None
@@ -356,6 +385,15 @@ def main():
             else:
                 print_invoices_table(invoices)
 
+            # Track per-invoice XML-persistence outcomes for state advancement.
+            # An invoice contributes to the new state marker only if its XML is
+            # durably on disk (either from a prior run or freshly written). Any
+            # failure is recorded so the marker is held back of it — next run
+            # will re-query the window and retry.
+            persisted_dates = []  # permanentStorageDate strings of durably-persisted invoices
+            failed_dates = []     # permanentStorageDate strings of invoices we could not persist
+            skipped_no_ksef = 0   # invoices without ksefNumber — untrackable, excluded from state
+
             # Download XML if requested
             if xml_output_dir and invoices:
                 if dry_run:
@@ -367,46 +405,57 @@ def main():
 
                 for inv in invoices:
                     ksef_number = inv.get('ksefNumber')
-                    if ksef_number:
-                        try:
-                            xml_dir = expand_date_template(xml_output_dir, inv.get('issueDate'))
-                            safe_prefix = ksef_number.replace('/', '_').replace('\\', '_')
+                    perm_date = inv.get('permanentStorageDate', '')
+                    if not ksef_number:
+                        logger.warning("Invoice missing ksefNumber — cannot persist, excluded from state: %s", inv)
+                        skipped_no_ksef += 1
+                        continue
+                    try:
+                        xml_dir = expand_date_template(xml_output_dir, inv.get('issueDate'))
+                        safe_prefix = ksef_number.replace('/', '_').replace('\\', '_')
 
-                            # Check if a valid XML already exists on disk for this ksef_number
-                            existing = glob(os.path.join(xml_dir, f"{safe_prefix}*.xml"))
-                            if existing:
-                                try:
-                                    with open(existing[0], 'rb') as f:
-                                        cached_raw = f.read()
-                                    etree.fromstring(cached_raw)
-                                    # Valid XML on disk — load into cache and skip download
-                                    xml_cache[ksef_number] = cached_raw
-                                    logger.info("Skipped (exists): %s", existing[0])
-                                    would_skip += 1
-                                    continue
-                                except (etree.XMLSyntaxError, OSError):
-                                    logger.warning("Existing file invalid, re-downloading: %s", existing[0])
-
-                            if dry_run:
-                                logger.info("[dry-run] Would download: %s -> %s%s*.xml",
-                                            ksef_number, xml_dir + os.sep, safe_prefix)
-                                would_download += 1
+                        # Check if a valid XML already exists on disk for this ksef_number
+                        existing = glob(os.path.join(xml_dir, f"{safe_prefix}*.xml"))
+                        if existing:
+                            try:
+                                with open(existing[0], 'rb') as f:
+                                    cached_raw = f.read()
+                                etree.fromstring(cached_raw)
+                                # Valid XML on disk — load into cache and skip download
+                                xml_cache[ksef_number] = cached_raw
+                                logger.info("Skipped (exists): %s", existing[0])
+                                would_skip += 1
+                                if not dry_run:
+                                    persisted_dates.append(perm_date)
                                 continue
+                            except (etree.XMLSyntaxError, OSError):
+                                logger.warning("Existing file invalid, re-downloading: %s", existing[0])
 
-                            xml_raw = get_xml_cached(ksef_number)
-                            os.makedirs(xml_dir, exist_ok=True)
-                            seller_name, buyer_name, inv_number = extract_invoice_parties(xml_raw)
-                            safe_name = safe_prefix
-                            if subject_type == 'Subject2':
-                                safe_name += '_' + sanitize_for_filename(inv_number) + '_' + sanitize_for_filename(seller_name)
-                            elif subject_type == 'Subject1':
-                                safe_name += '_' + sanitize_for_filename(inv_number) + '_' + sanitize_for_filename(buyer_name)
-                            filepath = os.path.join(xml_dir, f"{safe_name}.xml")
-                            with open(filepath, 'wb') as f:
-                                f.write(xml_raw)
-                            logger.info("Downloaded: %s", filepath)
-                        except KSeFError as e:
-                            logger.error("Failed to download %s: %s", ksef_number, e.message)
+                        if dry_run:
+                            logger.info("[dry-run] Would download: %s -> %s%s*.xml",
+                                        ksef_number, xml_dir + os.sep, safe_prefix)
+                            would_download += 1
+                            continue
+
+                        xml_raw = get_xml_cached(ksef_number)
+                        os.makedirs(xml_dir, exist_ok=True)
+                        seller_name, buyer_name, inv_number = extract_invoice_parties(xml_raw)
+                        safe_name = safe_prefix
+                        if subject_type == 'Subject2':
+                            safe_name += '_' + sanitize_for_filename(inv_number) + '_' + sanitize_for_filename(seller_name)
+                        elif subject_type == 'Subject1':
+                            safe_name += '_' + sanitize_for_filename(inv_number) + '_' + sanitize_for_filename(buyer_name)
+                        filepath = os.path.join(xml_dir, f"{safe_name}.xml")
+                        with open(filepath, 'wb') as f:
+                            f.write(xml_raw)
+                        logger.info("Downloaded: %s", filepath)
+                        persisted_dates.append(perm_date)
+                    except KSeFError as e:
+                        logger.error("Failed to download %s: %s — state will be held back of this invoice", ksef_number, e.message)
+                        failed_dates.append(perm_date)
+                    except OSError as e:
+                        logger.error("Failed to write XML for %s: %s — state will be held back of this invoice", ksef_number, e)
+                        failed_dates.append(perm_date)
 
                 if dry_run:
                     logger.info("[dry-run] XML summary for %s: %d would be downloaded, %d already present",
@@ -640,25 +689,61 @@ def main():
                         except OSError as e:
                             logger.warning("Failed to remove temporary file %s: %s", tmp_path, e)
 
-            # Save max permanentStorageDate per subject_type for incremental sync
-            if invoices:
+            # Save max permanentStorageDate per subject_type for incremental sync.
+            # Semantics: advance only up to the newest successfully-persisted invoice
+            # whose permanentStorageDate strictly precedes the oldest failure, so
+            # failed invoices get retried on the next run.
+            if not invoices:
+                logger.info("No invoices fetched for %s — state.json not updated", subject_type)
+            elif dry_run:
+                # Preview the marker we *would* set, based on the persistence plan.
+                if xml_output_dir:
+                    candidate = max((d for d in persisted_dates if d), default='')
+                else:
+                    candidate = max((inv.get('permanentStorageDate', '') for inv in invoices), default='')
+                if candidate:
+                    logger.info("[dry-run] Would update state.json for %s: %s", subject_type, candidate)
+                else:
+                    logger.info("[dry-run] state.json would not be updated for %s (no candidate date)", subject_type)
+            elif xml_output_dir:
+                # New behavior: advance only up to the bound implied by failures.
+                persisted = [d for d in persisted_dates if d]
+                failed = [d for d in failed_dates if d]
+                dropped_blank = (len(persisted_dates) - len(persisted)) + (len(failed_dates) - len(failed))
+                if dropped_blank:
+                    logger.warning("%d invoice(s) for %s had no permanentStorageDate — excluded from state calculation",
+                                   dropped_blank, subject_type)
+                if skipped_no_ksef:
+                    logger.warning("%d invoice(s) for %s had no ksefNumber — excluded from state calculation",
+                                   skipped_no_ksef, subject_type)
+
+                if not persisted and not failed:
+                    logger.warning("No invoices had a permanentStorageDate for %s — state.json not updated", subject_type)
+                elif not persisted:
+                    logger.warning("All %d invoice(s) for %s failed to persist — state.json not updated (will retry next run)",
+                                   len(failed), subject_type)
+                elif not failed:
+                    _save_state(state, state_path, subject_type, max(persisted))
+                else:
+                    min_failed = min(failed)
+                    safe = [d for d in persisted if d < min_failed]
+                    if not safe:
+                        logger.warning("Oldest failure for %s (%s) precedes all persisted invoices — state.json not updated "
+                                       "(%d failure(s) will be retried next run)",
+                                       subject_type, min_failed, len(failed))
+                    else:
+                        _save_state(state, state_path, subject_type, max(safe),
+                                    extra_msg=f" (held back of {len(failed)} failure(s) starting at {min_failed}; will retry next run)")
+            else:
+                # XML download not configured — fall back to legacy behavior: trust the query result.
                 max_date = max(
                     (inv.get('permanentStorageDate', '') for inv in invoices),
                     default=''
                 )
                 if max_date:
-                    if dry_run:
-                        logger.info("[dry-run] Would update state.json for %s: %s", subject_type, max_date)
-                    else:
-                        last_sync_map = state.setdefault('last_sync_utc', {})
-                        last_sync_map[subject_type] = max_date
-                        with open(state_path, 'w') as f:
-                            json.dump(state, f, indent=2)
-                        logger.info("Saved max permanentStorageDate for %s: %s to %s", subject_type, max_date, state_path)
+                    _save_state(state, state_path, subject_type, max_date)
                 else:
                     logger.warning("No permanentStorageDate found in invoices for %s — state.json not updated", subject_type)
-            else:
-                logger.info("No invoices fetched for %s — state.json not updated", subject_type)
 
         # Terminate session
         logger.info("Terminating session...")

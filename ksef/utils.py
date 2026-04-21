@@ -21,12 +21,11 @@ def format_amount(amount) -> str:
 def print_invoices_table(invoices: list):
     """Print invoices as formatted table."""
     if not invoices:
-        print("Nie znaleziono faktur.")
+        print("No invoices found.")
         return
 
-    # Nagłówek
     print("\n" + "=" * 120)
-    print(f"{'Numer KSeF':<45} {'Nr faktury':<20} {'Data':<12} {'NIP sprzed.':<12} {'Kwota brutto':>15}")
+    print(f"{'KSeF number':<45} {'Invoice no.':<20} {'Date':<12} {'Seller NIP':<12} {'Gross amount':>15}")
     print("=" * 120)
 
     for inv in invoices:
@@ -42,7 +41,7 @@ def print_invoices_table(invoices: list):
         print(f"{ksef_num:<45} {inv_num:<20} {inv_date:<12} {seller_nip:<12} {gross:>15}")
 
     print("=" * 120)
-    print(f"Razem: {len(invoices)} faktur(a/y)")
+    print(f"Total: {len(invoices)} invoice(s)")
 
 
 def print_invoices_json(invoices: list):
@@ -106,7 +105,7 @@ def extract_invoice_parties(xml_raw):
 def load_config(config_path):
     """Load configuration from JSON file and return a namespace object."""
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Plik konfiguracji nie znaleziony: {config_path}")
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
     with open(config_path, 'r') as f:
         cfg = json.load(f)
