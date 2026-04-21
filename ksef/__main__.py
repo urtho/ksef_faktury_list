@@ -34,6 +34,8 @@ def main():
                         help='Ścieżka do pliku konfiguracji (domyślnie: config.json)')
     parser.add_argument('--rerender', action='store_true',
                         help='Ponowne generowanie PDF z istniejących plików XML (bez pobierania z KSeF)')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Tylko sprawdź co zostałoby pobrane/wygenerowane/wysłane (bez zapisów i aktualizacji state.json)')
     cli_args = parser.parse_args()
     config_path = cli_args.config
     args = load_config(config_path)
@@ -279,6 +281,10 @@ def main():
             )
             auth_method = "certificate (XAdES)"
 
+        dry_run = cli_args.dry_run
+        if dry_run:
+            logger.info("DRY RUN — nothing will be downloaded, generated, sent, or saved")
+
         logger.info("Connecting to KSeF (environment: %s)...", args.env)
         logger.info("NIP: %s", args.nip)
         logger.info("Auth method: %s", auth_method)
@@ -352,7 +358,12 @@ def main():
 
             # Download XML if requested
             if xml_output_dir and invoices:
-                logger.info("Downloading XML files to: %s", xml_output_dir)
+                if dry_run:
+                    logger.info("[dry-run] Would download XML files to: %s", xml_output_dir)
+                else:
+                    logger.info("Downloading XML files to: %s", xml_output_dir)
+                would_download = 0
+                would_skip = 0
 
                 for inv in invoices:
                     ksef_number = inv.get('ksefNumber')
@@ -371,9 +382,16 @@ def main():
                                     # Valid XML on disk — load into cache and skip download
                                     xml_cache[ksef_number] = cached_raw
                                     logger.info("Skipped (exists): %s", existing[0])
+                                    would_skip += 1
                                     continue
                                 except (etree.XMLSyntaxError, OSError):
                                     logger.warning("Existing file invalid, re-downloading: %s", existing[0])
+
+                            if dry_run:
+                                logger.info("[dry-run] Would download: %s -> %s%s*.xml",
+                                            ksef_number, xml_dir + os.sep, safe_prefix)
+                                would_download += 1
+                                continue
 
                             xml_raw = get_xml_cached(ksef_number)
                             os.makedirs(xml_dir, exist_ok=True)
@@ -390,12 +408,38 @@ def main():
                         except KSeFError as e:
                             logger.error("Failed to download %s: %s", ksef_number, e.message)
 
+                if dry_run:
+                    logger.info("[dry-run] XML summary for %s: %d would be downloaded, %d already present",
+                                subject_type, would_download, would_skip)
+
             # Generate PDF if requested
             if pdf_output_dir and invoices:
-                logger.info("Generating PDF files to: %s", pdf_output_dir)
-                pdf_generator = InvoicePDFGenerator()
+                if dry_run:
+                    logger.info("[dry-run] Would generate PDF files to: %s", pdf_output_dir)
+                    would_generate = 0
+                    would_skip_pdf = 0
+                    for inv in invoices:
+                        ksef_number = inv.get('ksefNumber')
+                        if not ksef_number:
+                            continue
+                        pdf_dir = expand_date_template(pdf_output_dir, inv.get('issueDate'))
+                        safe_prefix = ksef_number.replace('/', '_').replace('\\', '_')
+                        existing_pdf = glob(os.path.join(pdf_dir, f"{safe_prefix}*.pdf"))
+                        if existing_pdf:
+                            logger.info("PDF exists: %s", existing_pdf[0])
+                            would_skip_pdf += 1
+                        else:
+                            logger.info("[dry-run] Would generate PDF: %s -> %s%s*.pdf",
+                                        ksef_number, pdf_dir + os.sep, safe_prefix)
+                            would_generate += 1
+                    logger.info("[dry-run] PDF summary for %s: %d would be generated, %d already present",
+                                subject_type, would_generate, would_skip_pdf)
+                    pdf_generator = None  # skip real generation below
+                else:
+                    logger.info("Generating PDF files to: %s", pdf_output_dir)
+                    pdf_generator = InvoicePDFGenerator()
 
-                for inv in invoices:
+                for inv in (invoices if not dry_run else []):
                     ksef_number = inv.get('ksefNumber')
                     if ksef_number:
                         try:
@@ -421,7 +465,10 @@ def main():
                             logger.error("PDF generation failed for %s: %s", ksef_number, e)
 
             # Send invoices by email if requested
-            if args.send_email and invoices:
+            if args.send_email and invoices and dry_run:
+                logger.info("[dry-run] Would send %d invoice(s) by email (mode: %s) to %s",
+                            len(invoices), args.email_group, args.email_to)
+            if args.send_email and invoices and not dry_run:
                 # Validate required SMTP arguments
                 missing = []
                 if not args.smtp_host:
@@ -600,11 +647,14 @@ def main():
                     default=''
                 )
                 if max_date:
-                    last_sync_map = state.setdefault('last_sync_utc', {})
-                    last_sync_map[subject_type] = max_date
-                    with open(state_path, 'w') as f:
-                        json.dump(state, f, indent=2)
-                    logger.info("Saved max permanentStorageDate for %s: %s to %s", subject_type, max_date, state_path)
+                    if dry_run:
+                        logger.info("[dry-run] Would update state.json for %s: %s", subject_type, max_date)
+                    else:
+                        last_sync_map = state.setdefault('last_sync_utc', {})
+                        last_sync_map[subject_type] = max_date
+                        with open(state_path, 'w') as f:
+                            json.dump(state, f, indent=2)
+                        logger.info("Saved max permanentStorageDate for %s: %s to %s", subject_type, max_date, state_path)
                 else:
                     logger.warning("No permanentStorageDate found in invoices for %s — state.json not updated", subject_type)
             else:
