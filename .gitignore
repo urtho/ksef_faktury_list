@@ -2,4 +2,4 @@ certs/*
 config.json
 output
 __pycache__/
-state.json
+meta

@@ -38,6 +38,7 @@ def _save_state(state, state_path, subject_type, max_date, extra_msg=''):
     state.setdefault('last_sync_utc', {})[subject_type] = max_date
     tmp_path = state_path + '.tmp'
     try:
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
         with open(tmp_path, 'w') as f:
             json.dump(state, f, indent=2)
         os.replace(tmp_path, state_path)
@@ -271,8 +272,8 @@ def main():
             logger.error("Private key file not found: %s", args.key)
             sys.exit(1)
 
-    # Load state for incremental sync
-    state_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'state.json')
+    # Load state for incremental sync (persisted under <config_dir>/meta/)
+    state_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), 'meta', 'state.json')
     state = {}
     if os.path.exists(state_path):
         try:
