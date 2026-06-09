@@ -323,6 +323,7 @@ class InvoicePDFGenerator:
             'footer_texts': [],
             'registry': {},
             'exchange_rate': None,
+            'rozliczenie': {},
         }
 
         # Header info
@@ -441,6 +442,32 @@ class InvoicePDFGenerator:
                 if rachunek is not None:
                     data['payment']['bank_account'] = rachunek.findtext('NrRB', '')
                     data['payment']['bank_name'] = rachunek.findtext('NazwaBanku', '')
+
+            # Settlement (Rozliczenie): additional charges/deductions and amount due
+            rozliczenie = fa.find('Rozliczenie')
+            if rozliczenie is not None:
+                obciazenia = []
+                for obc in rozliczenie.findall('Obciazenia'):
+                    obciazenia.append({
+                        'amount': self._parse_amount(obc.findtext('Kwota', '')),
+                        'reason': obc.findtext('Powod', ''),
+                    })
+                odliczenia = []
+                for odl in rozliczenie.findall('Odliczenia'):
+                    odliczenia.append({
+                        'amount': self._parse_amount(odl.findtext('Kwota', '')),
+                        'reason': odl.findtext('Powod', ''),
+                    })
+                data['rozliczenie'] = {
+                    'obciazenia': obciazenia,
+                    'suma_obciazen': self._parse_amount(rozliczenie.findtext('SumaObciazen', '')),
+                    'odliczenia': odliczenia,
+                    'suma_odliczen': self._parse_amount(rozliczenie.findtext('SumaOdliczen', '')),
+                    'do_zaplaty': self._parse_amount(rozliczenie.findtext('DoZaplaty', '')),
+                    'do_rozliczenia': self._parse_amount(rozliczenie.findtext('DoRozliczenia', '')),
+                    'has_do_zaplaty': rozliczenie.findtext('DoZaplaty') is not None,
+                    'has_do_rozliczenia': rozliczenie.findtext('DoRozliczenia') is not None,
+                }
 
         # Seller (Podmiot1)
         podmiot1 = root.find('.//Podmiot1')
@@ -867,6 +894,65 @@ class InvoicePDFGenerator:
         ]))
         elements.append(tax_table)
         elements.append(Spacer(1, 6 * mm))
+
+        # === ROZLICZENIE (additional charges / deductions, kept together) ===
+        rozliczenie = data.get('rozliczenie', {})
+        if rozliczenie and (rozliczenie.get('obciazenia') or rozliczenie.get('odliczenia')
+                            or rozliczenie.get('has_do_zaplaty') or rozliczenie.get('has_do_rozliczenia')):
+            roz_section = []
+            self._add_horizontal_line(roz_section)
+            roz_section.append(Paragraph("<b>Rozliczenie</b>", self.styles['SectionHeader']))
+
+            def _settlement_table(title, rows, total):
+                table_data = [[
+                    Paragraph(f"<b>{title}</b>", self.styles['TableCell']),
+                    Paragraph("<b>Kwota</b>", self.styles['TableCellRight']),
+                ]]
+                for r in rows:
+                    table_data.append([
+                        Paragraph(self._escape_xml_text(r['reason']), self.styles['TableCell']),
+                        Paragraph(self._format_amount(r['amount']), self.styles['TableCellRight']),
+                    ])
+                if total:
+                    table_data.append([
+                        Paragraph("<b>Suma</b>", self.styles['TableCellRight']),
+                        Paragraph(f"<b>{self._format_amount(total)}</b>", self.styles['TableCellRight']),
+                    ])
+                t = Table(table_data, colWidths=[150 * mm, 30 * mm])
+                t.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (-1, -1), self.font_name),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CCCCCC')),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F0F0')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ]))
+                return t
+
+            if rozliczenie.get('obciazenia'):
+                roz_section.append(_settlement_table(
+                    'Kwota obciążenia (powód)', rozliczenie['obciazenia'],
+                    rozliczenie.get('suma_obciazen')))
+                roz_section.append(Spacer(1, 2 * mm))
+
+            if rozliczenie.get('odliczenia'):
+                roz_section.append(_settlement_table(
+                    'Kwota odliczenia (powód)', rozliczenie['odliczenia'],
+                    rozliczenie.get('suma_odliczen')))
+                roz_section.append(Spacer(1, 2 * mm))
+
+            if rozliczenie.get('has_do_zaplaty'):
+                roz_section.append(Paragraph(
+                    f"<b>Do zapłaty: {self._format_amount(rozliczenie['do_zaplaty'])} {currency}</b>",
+                    self.styles['TotalRight']))
+            if rozliczenie.get('has_do_rozliczenia'):
+                roz_section.append(Paragraph(
+                    f"<b>Do rozliczenia: {self._format_amount(rozliczenie['do_rozliczenia'])} {currency}</b>",
+                    self.styles['TotalRight']))
+
+            roz_section.append(Spacer(1, 6 * mm))
+            elements.append(KeepTogether(roz_section))
 
         # === ADNOTACJE (kept together) ===
         annotations = data.get('annotations', [])
